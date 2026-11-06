@@ -4,7 +4,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mergeAll, type Part } from '../gen/core';
 
-export const BED = { w: 250, d: 250, h: 250, margin: 5, gap: 4 };
+export const BED = { w: 250, d: 250, h: 250, margin: 5, gap: 4 }; // changed by Settings
 
 /** Y-up preview coordinates → Z-up print coordinates (slicers use Z as up). */
 function toZUp(g: THREE.BufferGeometry) {
@@ -65,11 +65,16 @@ export function volumeCm3(g: THREE.BufferGeometry) {
   return Math.abs(v) / 1000;
 }
 
-export function estimate(g: THREE.BufferGeometry) {
+export type PrintOpts = { layer: number; infill: number; density: number; speed: number };
+export const PRINT: PrintOpts = { layer: 0.16, infill: 15, density: 1.24, speed: 1 };
+
+export function estimate(g: THREE.BufferGeometry, o: PrintOpts = PRINT) {
   const vol = volumeCm3(g) * 0.82; // overlap correction
-  // walls + 15 % infill ≈ 45 % of the solid; PLA 1.24 g/cm³
-  const grams = vol * 0.45 * 1.24 + 1;
-  const minutes = 6 + grams * 4.2; // detailed terrain at 0.2 mm on a Kobra S1
+  // walls + infill: about 38 % of the solid plus the infill share
+  const fill = 0.38 + (o.infill / 100) * 0.5;
+  const grams = vol * fill * o.density + 1;
+  // detailed terrain at 0.2 mm on a Kobra S1 ≈ 4.2 min per gram; thinner layers take longer
+  const minutes = (6 + (grams / 1.24) * 4.2 * (0.2 / o.layer) * 0.85) / o.speed;
   return { grams, minutes };
 }
 
@@ -85,7 +90,7 @@ export type Placed = { item: Item; x: number; y: number; rot: boolean };
 
 /** Lay pieces out on as few 250 × 250 plates as possible (shelves, biggest first, turning pieces to fit). */
 export function arrange(items: Item[]): Placed[][] {
-  const use = BED.w - BED.margin * 2;
+  const use = BED.w - BED.margin * 2, useD = BED.d - BED.margin * 2;
   const sized = items.map((item) => {
     item.geo.computeBoundingBox();
     const s = item.geo.boundingBox!.getSize(new THREE.Vector3());
@@ -102,7 +107,7 @@ export function arrange(items: Item[]): Placed[][] {
       const st = state[pi];
       for (const rot of [false, true]) {
         const w = rot ? s.d : s.w, d = rot ? s.w : s.d;
-        if (w > use || d > use) continue;
+        if (w > use || d > useD) continue;
         for (const sh of st.shelves) {
           if (sh.x + w <= use && d <= sh.h) {
             plates[pi].push({ item: s.item, x: sh.x + w / 2, y: sh.y + d / 2, rot });
@@ -110,7 +115,7 @@ export function arrange(items: Item[]): Placed[][] {
             return true;
           }
         }
-        if (st.used + d <= use) {
+        if (st.used + d <= useD) {
           const sh = { y: st.used, h: d, x: w + BED.gap };
           st.shelves.push(sh);
           st.used += d + BED.gap;
@@ -150,23 +155,23 @@ const esc = (s: string) => s.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt
 export const safeName = (s: string) => s.replace(/[^\w\- ()x.]+/g, '').replace(/\s+/g, '-').slice(0, 60);
 
 /** Everything in one zip: an STL for every piece (copies numbered) and a 3MF per build plate. */
-export function exportZip(items: Item[], setName: string) {
+export function exportZip(items: Item[], setName: string, o: { files: 'both' | '3mf' | 'stl'; readme: boolean; layer?: number } = { files: 'both', readme: true }) {
   const files: Record<string, Uint8Array> = {};
   const counts = new Map<string, number>();
   for (const it of items) {
     const base = safeName(it.name);
     const n = (counts.get(base) ?? 0) + 1;
     counts.set(base, n);
-    if (n === 1) files[`STL/${base}.stl`] = stl(it.geo, it.name);
+    if (n === 1 && o.files !== '3mf') files[`STL/${base}.stl`] = stl(it.geo, it.name);
   }
   const plates = arrange(items);
-  plates.forEach((pl, i) => (files[`Plates/${safeName(setName)}-plate-${i + 1}.3mf`] = threeMF(pl)));
+  if (o.files !== 'stl') plates.forEach((pl, i) => (files[`Plates/${safeName(setName)}-plate-${i + 1}.3mf`] = threeMF(pl)));
   const list = [...counts].map(([n, k]) => `${k} x ${n}`).join('\r\n');
-  files['README.txt'] = strToU8(
+  if (o.readme) files['README.txt'] = strToU8(
     `${setName} - made with Cypress Forge (28 mm scale, 1 inch squares)\r\n\r\n` +
-    `Plates/: open a plate in Anycubic Slicer Next (or any slicer) - pieces are already laid out for a 250 x 250 mm bed.\r\n` +
+    `Plates/: open a plate in Anycubic Slicer Next (or any slicer) - pieces are already laid out for a ${BED.w} x ${BED.d} mm bed.\r\n` +
     `STL/: one file per different piece if you'd rather place them yourself.\r\n\r\nPieces:\r\n${list}\r\n\r\n` +
-    `Suggested settings: 0.12-0.16 mm layers for the most detail (0.2 mm is fine), 2-3 walls, 10-15 % infill, no supports.\r\n` +
+    `Suggested settings: ${o.layer ?? 0.16} mm layers (0.12-0.16 mm keeps the most detail) for the most detail (0.2 mm is fine), 2-3 walls, 10-15 % infill, no supports.\r\n` +
     `Magnet holes are sized 0.3 mm larger than the magnet; clips print flat.\r\n`,
   );
   return { zip: zipSync(files, { level: 6 }), plates: plates.length };

@@ -89,7 +89,7 @@ export class Viewport {
 
   constructor(private host: HTMLElement, hq: boolean) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    this.renderer.setPixelRatio(Math.min(hq ? 2 : 1.5, window.devicePixelRatio));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -141,7 +141,7 @@ export class Viewport {
       this.controls.update();
       if (this.dirty) {
         this.dirty = false;
-        if (this.composer) this.composer.render();
+        if (this.composer && this.aoOn) this.composer.render();
         else this.renderer.render(this.scene, this.camera);
       }
     };
@@ -285,7 +285,7 @@ export class Viewport {
     this.boardSize = { w, d, sq };
     this.board.clear();
     const W = w * sq, D = d * sq;
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(W + 16, 4, D + 16), new THREE.MeshStandardMaterial({ color: '#23272E', roughness: 0.85 }));
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(W + 16, 4, D + 16), new THREE.MeshStandardMaterial({ color: this.plateColor, roughness: 0.85 }));
     plate.position.y = -2.02;
     plate.receiveShadow = true;
     this.board.add(plate);
@@ -294,13 +294,28 @@ export class Viewport {
     for (let z = 0; z <= d; z++) pts.push(-W / 2, 0.02, -D / 2 + z * sq, W / 2, 0.02, -D / 2 + z * sq);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    this.board.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#3A4049', transparent: true, opacity: 0.9 })));
+    const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#3A4049', transparent: true, opacity: 0.9 }));
+    lines.visible = this.gridOn;
+    this.board.add(lines);
     this.mini.position.set(-W / 2 - 22, 0, D / 2 - 12);
     this.fitShadows();
     this.dirty = true;
   }
 
-  setGrid(on: boolean) { this.board.children[1] && (this.board.children[1].visible = on); this.dirty = true; }
+  plateColor = '#23272E';
+  aoOn = true;
+  setBackground(bg: string, plate: string) {
+    this.scene.background = new THREE.Color(bg);
+    this.plateColor = plate;
+    const m = (this.board.children[0] as THREE.Mesh | undefined)?.material as THREE.MeshStandardMaterial | undefined;
+    m?.color.set(plate);
+    this.dirty = true;
+  }
+  setShadows(on: boolean) { this.sun.castShadow = on; this.renderer.shadowMap.needsUpdate = true; this.dirty = true; }
+  setAO(on: boolean) { this.aoOn = on; this.dirty = true; }
+  setRotateSpeed(v: number) { this.controls.rotateSpeed = v; this.controls.zoomSpeed = v; }
+  gridOn = true;
+  setGrid(on: boolean) { this.gridOn = on; this.board.children[1] && (this.board.children[1].visible = on); this.dirty = true; }
   setMini(on: boolean) { this.mini.visible = on; this.dirty = true; }
 
   /** Point the camera at one piece, or at the whole board. */

@@ -8,6 +8,7 @@ import { makeRoom, ROOMS, type RoomKind } from './ui/room';
 import { buildLibrary, eraLabel, type Entry } from './ui/library';
 import { printGeometry, estimate, fmtTime, exportZip, download, arrange, BED, type Item } from './export/export';
 import { Rng, INCH } from './gen/core';
+import { SETTINGS, saveSettings, DEFAULTS, PRINTERS, FILAMENTS, BACKGROUNDS, isHQ, APP_VERSION, type Settings } from './ui/settings';
 
 type BoardItem = { id: string; p: Params; x: number; z: number; y: number; rot: number };
 type Board = { w: number; d: number; items: BoardItem[] };
@@ -45,7 +46,10 @@ function snapTo(it: BoardItem, x: number, z: number, b: Board) {
   const sq = sqSize(it.p);
   const [fx, fz] = foot(it);
   const W = b.w * INCH, D = b.d * INCH;
-  const fine = it.p.piece === 'scatter' || it.p.piece === 'forest' ? 0.5 : 1; // props snap to half squares
+  const mode = SETTINGS.snap;
+  if (mode === 'off') return [x, z] as [number, number];
+  const base = mode === 'quarter' ? 0.25 : mode === 'half' ? 0.5 : 1;
+  const fine = it.p.piece === 'scatter' || it.p.piece === 'forest' ? Math.min(0.5, base) : base; // props snap to half squares
   const sx = (Math.round(((x + W / 2) / sq - fx / 2) / fine) * fine + fx / 2) * sq - W / 2;
   const sz = (Math.round(((z + D / 2) / sq - fz / 2) / fine) * fine + fz / 2) * sq - D / 2;
   return [Math.max(-W / 2 + (fx * sq) / 2 - sq, Math.min(W / 2 - (fx * sq) / 2 + sq, sx)), Math.max(-D / 2 + (fz * sq) / 2 - sq, Math.min(D / 2 - (fz * sq) / 2 + sq, sz))] as [number, number];
@@ -71,12 +75,20 @@ export default function App() {
   const [undo, setUndo] = useState<Board[]>([]);
   const [redo, setRedo] = useState<Board[]>([]);
   const [selId, setSelId] = useState<string | null>(null);
-  const [simple, setSimple] = useState<boolean>(() => load(LS.simple, false));
-  const [look, setLook] = useState<Look>('painted');
-  const [gridOn, setGridOn] = useState(true);
-  const [miniOn, setMiniOn] = useState(true);
+  const [settings, setSettingsState] = useState<Settings>(SETTINGS);
+  const setSettings = (n: Partial<Settings>) => setSettingsState((cur) => { const s = { ...cur, ...n }; saveSettings(s); return s; });
+  const simple = settings.editorMode === 'simple';
+  const setSimple = (v: boolean) => setSettings({ editorMode: v ? 'simple' : 'all' });
+  const look = settings.look as Look;
+  const setLook = (v: Look) => setSettings({ look: v as Settings['look'] });
+  const gridOn = settings.grid, miniOn = settings.mini;
+  const setGridOn = (v: boolean) => setSettings({ grid: v });
+  const setMiniOn = (v: boolean) => setSettings({ mini: v });
+  const [vpGen, setVpGen] = useState(0);
+  const [canInstall, setCanInstall] = useState(() => !!(window as any).__installPrompt);
+  const [installed, setInstalled] = useState(() => matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true);
   const [busy, setBusy] = useState(false);
-  const [modal, setModal] = useState<null | 'room' | 'sets' | 'export' | 'help'>(null);
+  const [modal, setModal] = useState<null | 'room' | 'sets' | 'export' | 'help' | 'settings' | 'install'>(null);
   const [tab, setTab] = useState<'lib' | 'edit' | 'print'>('lib');
   const [toast, setToast] = useState('');
   const [q, setQ] = useState('');
@@ -97,8 +109,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const hq = !matchMedia('(pointer: coarse)').matches && window.innerWidth > 900;
-    const v = new Viewport(host.current!, hq);
+    const v = new Viewport(host.current!, isHQ());
     vp.current = v;
     v.onSelect = (id) => { setSelId(id); if (id) setTab('edit'); };
     v.snap = (id, x, z) => { const it = boardRef.current.items.find((i) => i.id === id); return it ? snapTo(it, x, z, boardRef.current) : [x, z]; };
@@ -110,13 +121,23 @@ export default function App() {
       board: (b: Board) => setBoard(b, false),
       frame: () => vp.current?.frame(),
     };
+    setVpGen((g) => g + 1);
     setTimeout(() => v.frame(), 50);
     return () => v.dispose();
-  }, []);
+  }, [settings.quality]);
   useEffect(() => save(LS.state, board), [board]);
-  useEffect(() => save(LS.simple, simple), [simple]);
-  useEffect(() => vp.current?.setGrid(gridOn), [gridOn]);
-  useEffect(() => vp.current?.setMini(miniOn), [miniOn]);
+  useEffect(() => vp.current?.setGrid(gridOn), [gridOn, vpGen]);
+  useEffect(() => vp.current?.setMini(miniOn), [miniOn, vpGen]);
+  useEffect(() => { const b = BACKGROUNDS[settings.background]; vp.current?.setBackground(b.bg, b.plate); }, [settings.background, vpGen]);
+  useEffect(() => vp.current?.setShadows(settings.shadows), [settings.shadows, vpGen]);
+  useEffect(() => vp.current?.setAO(settings.ao), [settings.ao, vpGen]);
+  useEffect(() => vp.current?.setRotateSpeed(settings.rotateSpeed), [settings.rotateSpeed, vpGen]);
+  useEffect(() => {
+    const a = () => setCanInstall(true), b = () => { setInstalled(true); setCanInstall(false); setToast('Cypress Forge is installed. Open it from your home screen or Start menu.'); };
+    window.addEventListener('forge-can-install', a);
+    window.addEventListener('forge-installed', b);
+    return () => { window.removeEventListener('forge-can-install', a); window.removeEventListener('forge-installed', b); };
+  }, []);
   useEffect(() => vp.current?.select(selId), [selId]);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 3200); return () => clearTimeout(t); } }, [toast]);
 
@@ -135,7 +156,7 @@ export default function App() {
       setBusy(false);
     }, 120);
     return () => clearTimeout(t);
-  }, [board, look, selId]);
+  }, [board, look, selId, vpGen]);
 
   const change = useCallback((next: Partial<Params> | ((q: Params) => Params)) => {
     if (!selId) return;
@@ -153,7 +174,8 @@ export default function App() {
   }, [selId, setBoard]);
 
   const addPiece = (p: Params, at?: { x: number; z: number }) => {
-    const it: BoardItem = { id: uid(), p: { ...p, seed: new Rng(Date.now()).int(1, 999999) }, x: 0, z: 0, y: 0, rot: 0 };
+    const S = SETTINGS;
+    const it: BoardItem = { id: uid(), p: { ...p, grid: S.defGrid, base: S.defBase, magnet: S.defMagnet, detail: S.defDetail, texture: S.defTexture, wear: S.defWear, seed: new Rng(Date.now()).int(1, 999999) }, x: 0, z: 0, y: 0, rot: 0 };
     let x = at?.x ?? 0, z = at?.z ?? 0;
     if (!at) {
       // first free spot, scanning from the middle out
@@ -169,7 +191,7 @@ export default function App() {
     setTab('edit');
   };
 
-  const removeSel = () => { if (!selId) return; setBoard((b) => ({ ...b, items: b.items.filter((i) => i.id !== selId) })); setSelId(null); };
+  const removeSel = () => { if (!selId) return; if (SETTINGS.confirmDelete && !confirm('Delete this piece?')) return; setBoard((b) => ({ ...b, items: b.items.filter((i) => i.id !== selId) })); setSelId(null); };
   const rotateSel = (d = 1) => selId && setBoard((b) => ({ ...b, items: b.items.map((i) => { if (i.id !== selId) return i; const n = { ...i, rot: (i.rot + d + 4) % 4 }; const [x, z] = snapTo(n, i.x, i.z, b); return { ...n, x, z }; }) }));
   const raiseSel = (d: number) => selId && setBoard((b) => ({ ...b, items: b.items.map((i) => (i.id === selId ? { ...i, y: Math.max(0, i.y + d * (INCH / 4)) } : i)) }));
   const dupSel = () => {
@@ -206,6 +228,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  const install = async () => {
+    const ev = (window as any).__installPrompt;
+    if (ev) {
+      ev.prompt();
+      const r = await ev.userChoice.catch(() => null);
+      (window as any).__installPrompt = null;
+      setCanInstall(false);
+      if (r?.outcome === 'accepted') setToast('Installing… it will show up with your apps.');
+      return;
+    }
+    setModal('install');
+  };
+
   // ---------- print totals ----------
   const totals = useMemo(() => {
     let grams = 0, minutes = 0;
@@ -229,11 +264,11 @@ export default function App() {
         grams += est.grams; minutes += est.minutes;
         items.push({ name, geo: g });
       }
-      if (clipBases) items.push({ name: `Connector clips x${clipBases * 4}`, geo: printGeometry(clipSet(Math.min(48, clipBases * 4)).parts) });
+      if (clipBases && settings.clips) items.push({ name: `Connector clips x${clipBases * 4}`, geo: printGeometry(clipSet(Math.min(48, clipBases * 4)).parts) });
     } catch { /* a piece failed; shown elsewhere */ }
     const plates = items.length ? arrange(items).length : 0;
-    return { grams, minutes, pieces: board.items.length, plates, items };
-  }, [board]);
+    return { grams, minutes, pieces: board.items.length, plates, items, cost: (grams / 1000) * settings.costKg };
+  }, [board, settings]);
 
   const doExport = async (only?: BoardItem) => {
     setBusy(true);
@@ -241,7 +276,7 @@ export default function App() {
     const items = only ? [{ name: build(only.p).name, geo: printGeometry(build(only.p).parts) }] : totals.items;
     if (!items.length) { setToast('Put some pieces on the board first.'); setBusy(false); return; }
     const name = only ? build(only.p).name : setName;
-    const { zip, plates } = exportZip(items, name);
+    const { zip, plates } = exportZip(items, name, { files: settings.files, readme: settings.readme, layer: settings.layer });
     download(zip, `${name.replace(/[^\w\- ]+/g, '').trim() || 'terrain'}.zip`, 'application/zip');
     setBusy(false);
     setToast(`Downloaded ${items.length} piece${items.length === 1 ? '' : 's'} on ${plates} plate${plates === 1 ? '' : 's'}`);
@@ -255,11 +290,13 @@ export default function App() {
     <div className={`app tab-${tab}`}>
       <header>
         <div className="logo">Cypress <span>Forge</span></div>
-        <div className="sub">Printable D&amp;D terrain · 28 mm minis · Kobra S1 bed 250 × 250 mm</div>
+        <div className="sub">Printable D&amp;D terrain · 28 mm minis · {PRINTERS.find((x) => x.id === settings.printer)?.label.replace(/ \(.*\)/, '') ?? 'Custom'} bed {settings.bedW} × {settings.bedD} mm</div>
         <div className="hbtns">
-          <button onClick={() => setModal('room')}>✨ <span className="hide-s">Generate a</span> room</button>
+          <button onClick={() => setModal('room')}>✨<span className="hide-s"> Generate a room</span></button>
           <button onClick={() => setModal('sets')}>📂 <span className="hide-s">My boards</span></button>
-          <button onClick={() => setModal('help')} aria-label="Help">?</button>
+          {!installed && <button className="get" onClick={() => void install()}>📲 <span className="hide-s">Get the app</span></button>}
+          <button onClick={() => setModal('settings')} aria-label="Settings">⚙<span className="hide-s"> Settings</span></button>
+          <button className="helpbtn" onClick={() => setModal('help')} aria-label="Help">?</button>
           <button className="primary" onClick={() => setModal('export')}>⬇ Export</button>
         </div>
       </header>
@@ -410,7 +447,7 @@ export default function App() {
 
       <section className="tray">
         <input className="setname" value={setName} onChange={(e) => setSetName(e.target.value)} aria-label="Board name" />
-        <div className="small muted">{totals.pieces} piece{totals.pieces === 1 ? '' : 's'} · {totals.plates} print plate{totals.plates === 1 ? '' : 's'} · about {fmtTime(totals.minutes)} · {Math.round(totals.grams)} g of filament</div>
+        <div className="small muted">{totals.pieces} piece{totals.pieces === 1 ? '' : 's'} · {totals.plates} print plate{totals.plates === 1 ? '' : 's'} · about {fmtTime(totals.minutes)} · {Math.round(totals.grams)} g of {FILAMENTS[settings.filament].label} · ${totals.cost.toFixed(2)}</div>
         <div className="trayact">
           <button onClick={doUndo} disabled={!undo.length}>↶</button>
           <button onClick={doRedo} disabled={!redo.length}>↷</button>
@@ -459,6 +496,21 @@ export default function App() {
       )}
 
       {modal === 'sets' && <SetsModal board={board} name={setName} onLoad={(s) => { setBoard(s.board); setSetName(s.name); setSelId(null); setModal(null); setToast(`Opened "${s.name}"`); setTimeout(() => vp.current?.frame(), 300); }} onClose={() => setModal(null)} toast={setToast} />}
+
+      {modal === 'settings' && <SettingsModal s={settings} set={setSettings} onClose={() => setModal(null)} toast={setToast} install={install} installed={installed} canInstall={canInstall} />}
+
+      {modal === 'install' && (
+        <Modal title="Get Cypress Forge as an app" onClose={() => setModal(null)}>
+          <p className="muted">It installs straight from this page (no app store), gets its own icon, opens full screen and works with no internet once installed.</p>
+          <div className="installgrid">
+            <div className="expcard"><b>📱 Android: Chrome</b><span>Tap the <b>⋮</b> menu (top right), then <b>Add to Home screen</b> → <b>Install</b>.</span></div>
+            <div className="expcard"><b>📱 Android: Samsung Internet</b><span>Tap the <b>☰</b> menu (bottom right), then <b>Add page to</b> → <b>Home screen</b>.</span></div>
+            <div className="expcard"><b>💻 Windows / Mac: Chrome or Edge</b><span>Click the <b>install icon</b> (a screen with a down arrow) at the right end of the address bar, or the <b>⋮</b> / <b>…</b> menu → <b>Install Cypress Forge</b> (Edge: <b>Apps</b> → <b>Install this site as an app</b>).</span></div>
+            <div className="expcard"><b>🍎 iPhone / iPad: Safari</b><span>Tap <b>Share</b> (the square with an arrow), then <b>Add to Home Screen</b>.</span></div>
+          </div>
+          <p className="small muted">Already installed? Open it from your home screen, app drawer or Start menu. Your boards and settings stay on this device.</p>
+        </Modal>
+      )}
 
       {modal === 'help' && (
         <Modal title="How Cypress Forge works" onClose={() => setModal(null)}>
@@ -616,6 +668,210 @@ function SetsModal({ board, name, onLoad, onClose, toast }: { board: Board; name
             </div>
           </div>
         ))}
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------- Settings ----------------
+type SecId = 'display' | 'build' | 'pieces' | 'printer' | 'export' | 'app';
+const SECTIONS: { id: SecId; label: string }[] = [
+  { id: 'display', label: '🖥 Display' },
+  { id: 'build', label: '🧱 Building' },
+  { id: 'pieces', label: '✨ New pieces' },
+  { id: 'printer', label: '🖨 Printer' },
+  { id: 'export', label: '⬇ Export' },
+  { id: 'app', label: '📲 App & data' },
+];
+
+function Opt<T extends string>({ label, help, value, options, onChange }: { label: string; help?: string; value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
+  return (
+    <div className="row">
+      <div className="t">{label}</div>
+      <div className="chips">{options.map((o) => <button key={o.id} className={value === o.id ? 'on' : ''} onClick={() => onChange(o.id)}>{o.label}</button>)}</div>
+      {help && <div className="help">{help}</div>}
+    </div>
+  );
+}
+function Tog({ label, help, value, onChange }: { label: string; help?: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="row">
+      <label className="toggle"><input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} /><span className="sw" /> {label}</label>
+      {help && <div className="help">{help}</div>}
+    </div>
+  );
+}
+function Num({ label, help, value, min, max, step, fmt, onChange }: { label: string; help?: string; value: number; min: number; max: number; step: number; fmt: (v: number) => string; onChange: (v: number) => void }) {
+  const [live, setLive] = useState(value);
+  useEffect(() => setLive(value), [value]);
+  return (
+    <div className="row">
+      <div className="t">{label} <b>{fmt(live)}</b></div>
+      <div className="sl"><input type="range" min={min} max={max} step={step} value={live} aria-label={label} onChange={(e) => setLive(+e.target.value)} onPointerUp={(e) => onChange(+(e.target as HTMLInputElement).value)} onKeyUp={(e) => onChange(+(e.target as HTMLInputElement).value)} /></div>
+      {help && <div className="help">{help}</div>}
+    </div>
+  );
+}
+function MM({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <label className="mm"><span>{label}</span>
+      <span className="mmin"><input type="number" min={80} max={1000} value={value} onChange={(e) => { const v = Math.round(+e.target.value); if (v >= 80 && v <= 1000) onChange(v); }} /> mm</span>
+    </label>
+  );
+}
+
+function SettingsModal({ s, set, onClose, toast, install, installed, canInstall }: { s: Settings; set: (n: Partial<Settings>) => void; onClose: () => void; toast: (t: string) => void; install: () => void; installed: boolean; canInstall: boolean }) {
+  const [sec, setSec] = useState<SecId>('display');
+  const [offline, setOffline] = useState<'checking' | 'ready' | 'no'>('checking');
+  const [usage, setUsage] = useState('');
+  const file = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const ok = !!navigator.serviceWorker?.controller && (await caches.keys()).some((k) => k.startsWith('forge'));
+        setOffline(ok ? 'ready' : 'no');
+      } catch { setOffline('no'); }
+      try { const e = await navigator.storage?.estimate(); if (e?.usage != null) setUsage(`${(e.usage / 1048576).toFixed(1)} MB`); } catch { /* not supported */ }
+    })();
+  }, []);
+  const pct = (v: number) => `${Math.round(v * 100)} %`;
+  const backup = () => {
+    const data: Record<string, string | null> = {};
+    for (const k of ['forge-board-v2', 'forge-boards-v2', 'forge-settings']) data[k] = localStorage.getItem(k);
+    download(JSON.stringify({ app: 'cypress-forge', version: APP_VERSION, data }), `cypress-forge-backup-${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
+  };
+  const checkUpdate = async () => {
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      await reg?.update();
+      const r = await fetch('./index.html', { cache: 'no-store' });
+      const html = await r.text();
+      const cur = [...document.scripts].map((x) => x.src.split('/').pop()).find((x) => x?.startsWith('index-'));
+      if (cur && !html.includes(cur)) { toast('Update found. Restarting…'); setTimeout(() => location.reload(), 900); }
+      else toast(`You have the latest version (${APP_VERSION}).`);
+    } catch { toast('Could not check right now (are you offline?).'); }
+  };
+  const printer = PRINTERS.find((p) => p.id === s.printer);
+  return (
+    <Modal title="Settings" onClose={onClose}>
+      <div className="settings">
+        <nav className="setnav">
+          {SECTIONS.map((x) => <button key={x.id} className={sec === x.id ? 'on' : ''} onClick={() => setSec(x.id)}>{x.label}</button>)}
+        </nav>
+        <div className="setbody">
+          {sec === 'display' && (<>
+            <Opt label="Graphics quality" value={s.quality} onChange={(v) => set({ quality: v })} options={[{ id: 'auto', label: 'Auto' }, { id: 'high', label: 'High' }, { id: 'fast', label: 'Fast' }]} help="High adds soft corner shading and sharper edges. Fast is smoother on phones and older laptops. Auto picks for this device." />
+            <Tog label="Shadows" value={s.shadows} onChange={(v) => set({ shadows: v })} />
+            <Tog label="Corner shading (ambient occlusion)" value={s.ao} onChange={(v) => set({ ao: v })} help={isHQ() ? 'Darkens cracks and corners so detail reads like a painted model.' : 'Only works with High quality.'} />
+            <Opt label="Background" value={s.background} onChange={(v) => set({ background: v })} options={(Object.keys(BACKGROUNDS) as Settings['background'][]).map((k) => ({ id: k, label: BACKGROUNDS[k].label }))} />
+            <Opt label="How pieces look" value={s.look} onChange={(v) => set({ look: v })} options={[{ id: 'painted', label: '🎨 Painted' }, { id: 'plastic', label: '⬜ Plain print' }]} />
+            <Tog label="Show the grid" value={s.grid} onChange={(v) => set({ grid: v })} />
+            <Tog label="Show the 28 mm mini for scale" value={s.mini} onChange={(v) => set({ mini: v })} />
+            <Num label="Camera turn and zoom speed" value={s.rotateSpeed} min={0.3} max={2} step={0.1} fmt={pct} onChange={(v) => set({ rotateSpeed: v })} />
+          </>)}
+          {sec === 'build' && (<>
+            <Opt label="Snap pieces to" value={s.snap} onChange={(v) => set({ snap: v })} options={[{ id: 'square', label: 'Whole squares' }, { id: 'half', label: 'Half squares' }, { id: 'quarter', label: 'Quarter squares' }, { id: 'off', label: 'Free (no snap)' }]} help="Props and trees always snap at least to half squares." />
+            <Opt label="Edit panel opens with" value={s.editorMode} onChange={(v) => set({ editorMode: v })} options={[{ id: 'simple', label: 'Simple options' }, { id: 'all', label: 'All options' }]} />
+            <Tog label="Ask before deleting a piece" value={s.confirmDelete} onChange={(v) => set({ confirmDelete: v })} />
+            <div className="tips small"><b>Shortcuts</b><br />R turn · Shift+R turn back · Delete remove · Ctrl+D copy · arrow keys move · Page Up/Down raise/lower · Ctrl+Z undo · Ctrl+Y redo · Esc deselect</div>
+          </>)}
+          {sec === 'pieces' && (<>
+            <p className="small muted">Every piece you add to the board starts with these. You can still change each piece afterwards.</p>
+            <Opt label="Grid size" value={s.defGrid} onChange={(v) => set({ defGrid: v })} options={[{ id: 'in', label: '1 inch (D&D standard)' }, { id: 'mm25', label: '25 mm' }]} />
+            <Opt label="Base" value={s.defBase} onChange={(v) => set({ defBase: v })} options={[{ id: 'flat', label: 'Flat' }, { id: 'magnet', label: 'Magnets' }, { id: 'clip', label: 'Clip slots' }, { id: 'none', label: 'No base' }]} />
+            {s.defBase === 'magnet' && <Opt label="Magnet size" value={s.defMagnet} onChange={(v) => set({ defMagnet: v })} options={[{ id: '5x2', label: '5×2 mm' }, { id: '6x2', label: '6×2 mm' }, { id: '6x3', label: '6×3 mm' }, { id: '8x3', label: '8×3 mm' }]} help="Holes are made 0.3 mm bigger than the magnet so they press in." />}
+            <Num label="Wear and damage" value={s.defWear} min={0} max={1} step={0.05} fmt={pct} onChange={(v) => set({ defWear: v })} />
+            <Num label="Surface texture" value={s.defTexture} min={0} max={1} step={0.05} fmt={pct} onChange={(v) => set({ defTexture: v })} />
+            <Num label="Detail depth" value={s.defDetail} min={0.5} max={1.6} step={0.05} fmt={pct} onChange={(v) => set({ defDetail: v })} />
+            <button onClick={() => set({ defGrid: DEFAULTS.defGrid, defBase: DEFAULTS.defBase, defMagnet: DEFAULTS.defMagnet, defWear: DEFAULTS.defWear, defTexture: DEFAULTS.defTexture, defDetail: DEFAULTS.defDetail })}>↺ Reset these</button>
+          </>)}
+          {sec === 'printer' && (<>
+            <div className="row">
+              <div className="t">Printer</div>
+              <select value={s.printer} onChange={(e) => { const p = PRINTERS.find((x) => x.id === e.target.value)!; set(p.id === 'custom' ? { printer: p.id } : { printer: p.id, bedW: p.w, bedD: p.d, bedH: p.h }); }}>
+                {PRINTERS.map((p) => <option key={p.id} value={p.id}>{p.label}{p.id !== 'custom' ? ` (${p.w} × ${p.d} × ${p.h})` : ''}</option>)}
+              </select>
+              <div className="help">Pieces are packed onto plates this size when you export.</div>
+            </div>
+            <div className="row mmrow">
+              <MM label="Bed width" value={s.bedW} onChange={(v) => set({ bedW: v, printer: 'custom' })} />
+              <MM label="Bed depth" value={s.bedD} onChange={(v) => set({ bedD: v, printer: 'custom' })} />
+              <MM label="Max height" value={s.bedH} onChange={(v) => set({ bedH: v, printer: 'custom' })} />
+            </div>
+            <Opt label="Layer height" value={String(s.layer) as any} onChange={(v) => set({ layer: +v })} options={['0.08', '0.12', '0.16', '0.2', '0.28'].map((x) => ({ id: x as any, label: `${x} mm` }))} help="0.12–0.16 mm keeps the brick and wood texture crisp. Used for time estimates and the README." />
+            <Num label="Infill" value={s.infill} min={5} max={50} step={5} fmt={(v) => `${v} %`} onChange={(v) => set({ infill: v })} />
+            <Opt label="Filament" value={s.filament} onChange={(v) => set({ filament: v })} options={(Object.keys(FILAMENTS) as Settings['filament'][]).map((k) => ({ id: k, label: FILAMENTS[k].label }))} />
+            <div className="row">
+              <div className="t">Filament price <b>${s.costKg.toFixed(2)} / kg</b></div>
+              <div className="stepper">
+                <button onClick={() => set({ costKg: Math.max(5, s.costKg - 1) })}>−</button>
+                <input className="numin" type="number" min={5} max={200} value={s.costKg} onChange={(e) => +e.target.value > 0 && set({ costKg: +e.target.value })} />
+                <button onClick={() => set({ costKg: Math.min(200, s.costKg + 1) })}>+</button>
+              </div>
+            </div>
+            <Num label="Print speed adjustment" value={s.speed} min={0.5} max={2.5} step={0.1} fmt={pct} onChange={(v) => set({ speed: v })} help="If real prints finish faster or slower than the estimate, adjust this to match." />
+            <p className="small muted">Current: {printer?.label ?? 'Custom'} · {s.bedW} × {s.bedD} × {s.bedH} mm</p>
+          </>)}
+          {sec === 'export' && (<>
+            <Opt label="Files in the download" value={s.files} onChange={(v) => set({ files: v })} options={[{ id: 'both', label: '3MF plates + STLs' }, { id: '3mf', label: 'Only 3MF plates' }, { id: 'stl', label: 'Only STLs' }]} help="3MF plates open in Anycubic Slicer Next already laid out. STLs are one file per different piece." />
+            <Tog label="Include connector clips when pieces use clip slots" value={s.clips} onChange={(v) => set({ clips: v })} />
+            <Tog label="Include a README with print settings" value={s.readme} onChange={(v) => set({ readme: v })} />
+          </>)}
+          {sec === 'app' && (<>
+            <div className="row">
+              <div className="t">Install</div>
+              {installed ? <div className="okline">✓ You're using the installed app.</div> : (
+                <>
+                  <button className="primary" onClick={() => void install()}>📲 {canInstall ? 'Install Cypress Forge' : 'How to install'}</button>
+                  <div className="help">Adds Cypress Forge to your home screen or Start menu so it opens like a normal app and works offline.</div>
+                </>
+              )}
+            </div>
+            <div className="row">
+              <div className="t">Works offline</div>
+              <div className={offline === 'ready' ? 'okline' : 'muted small'}>{offline === 'checking' ? 'Checking…' : offline === 'ready' ? '✓ Saved on this device: works with no internet' : 'Not saved yet: reload once while online and it will be.'}</div>
+              {usage && <div className="help">Using {usage} of storage on this device.</div>}
+            </div>
+            <div className="row">
+              <div className="t">Help</div>
+              <button onClick={() => { onClose(); setTimeout(() => document.querySelector<HTMLButtonElement>('.helpbtn')?.click(), 50); }}>❓ How Cypress Forge works</button>
+            </div>
+            <div className="row">
+              <div className="t">Version <b>{APP_VERSION}</b></div>
+              <button onClick={() => void checkUpdate()}>🔄 Check for updates</button>
+            </div>
+            <div className="row">
+              <div className="t">Back up</div>
+              <div className="btnrow">
+                <button onClick={backup}>💾 Back up everything</button>
+                <button onClick={() => file.current?.click()}>📂 Restore a backup</button>
+              </div>
+              <div className="help">One file with your current board, all saved boards and these settings. Use it to move to another device.</div>
+              <input ref={file} type="file" accept=".json" hidden onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                try {
+                  const j = JSON.parse(await f.text());
+                  if (j.app !== 'cypress-forge' || !j.data) throw new Error();
+                  for (const [k, v] of Object.entries(j.data as Record<string, string | null>)) if (v != null) localStorage.setItem(k, v);
+                  toast('Backup restored. Restarting…');
+                  setTimeout(() => location.reload(), 900);
+                } catch { toast('That file is not a Cypress Forge backup.'); }
+              }} />
+            </div>
+            <div className="row danger">
+              <div className="t">Reset</div>
+              <div className="btnrow">
+                <button onClick={() => { if (confirm('Put every setting back to how it started?')) { set({ ...DEFAULTS }); toast('Settings reset.'); } }}>↺ Reset settings</button>
+                <button className="warn" onClick={() => {
+                  if (!confirm('Erase your board, all saved boards and settings from this device? This cannot be undone.')) return;
+                  for (const k of Object.keys(localStorage)) if (k.startsWith('forge')) localStorage.removeItem(k);
+                  location.reload();
+                }}>🗑 Erase everything</button>
+              </div>
+            </div>
+          </>)}
+        </div>
       </div>
     </Modal>
   );

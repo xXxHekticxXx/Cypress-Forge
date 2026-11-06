@@ -146,3 +146,38 @@ aside.left { display: flex; flex-direction: column; overflow: hidden; }
   .exp, .roomgrid { grid-template-columns: 1fr; }
 }
 .row select { width: 100%; margin-top: 6px; background: var(--panel); color: var(--ink); border: 1px solid var(--line2); border-radius: 10px; padding: 9px 10px; font: inherit; font-size: 14px; }
+/* settings + install */
+.modal:has(.settings) { width: min(820px, 100%); }
+.settings { display: grid; grid-template-columns: 170px 1fr; gap: 16px; margin-top: 12px; min-height: 420px; }
+.setnav { display: flex; flex-direction: column; gap: 4px; }
+.setnav button { text-align: left; border-color: transparent; background: transparent; padding: 9px 10px; }
+.setnav button.on { background: #2A2416; border-color: var(--gold); color: var(--gold); }
+.setbody { min-width: 0; }
+.mmrow { display: flex; gap: 10px; flex-wrap: wrap; }
+.mm { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
+.mm input, .numin { width: 90px; background: var(--panel); border: 1px solid var(--line2); border-radius: 8px; color: var(--ink); font: inherit; padding: 7px 8px; }
+.numin { width: 70px; text-align: center; }
+.okline { color: #9FE0B5; font-size: 13px; margin-top: 4px; }
+.row > button { margin-top: 6px; }
+.danger { border-top: 1px solid var(--line); padding-top: 12px; }
+button.warn { border-color: #7A3A35; color: #FF8F86; }
+button.get { border-color: var(--gold); color: var(--gold); }
+.installgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.installgrid span { font-size: 13px; line-height: 1.45; }
+@media (max-width: 900px) {
+  .settings { grid-template-columns: 1fr; min-height: 0; }
+  .setnav { flex-direction: row; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
+  .setnav button { white-space: nowrap; flex: 0 0 auto; border-color: var(--line2); }
+  .installgrid { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  .settings { grid-template-columns: minmax(0, 1fr); }
+  .setnav { min-width: 0; }
+  .hbtns { gap: 5px; } .hbtns button { padding: 7px 8px; }
+  .hbtns .helpbtn { display: none; }
+  .modal { padding: 14px; }
+}
+.mmin { display: flex; align-items: center; gap: 6px; font-weight: 400; color: var(--muted); }
+.app { width: 100%; max-width: 100vw; overflow: hidden; }
+header { min-width: 0; }
+@media (max-width: 900px) { .logo { font-size: 16px; } header { gap: 6px; } .modal { width: 100% !important; max-width: calc(100vw - 20px); } .modalbg { padding: 10px; } }
