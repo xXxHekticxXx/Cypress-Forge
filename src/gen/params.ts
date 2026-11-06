@@ -18,7 +18,20 @@ export type Params = {
   top: string;
   wallH: number;   // inches
   wallT: number;   // mm
-  opening: 'none' | 'arch' | 'square' | 'window' | 'broken';
+  opening: string;      // see OPENINGS
+  openingPos: 'center' | 'left' | 'right' | 'two';
+  popout: number;       // mm bricks/stones stand out from the mortar
+  joint: number;        // mm gap between bricks/stones/planks
+  bricksPer: number;    // bricks along one square
+  courses: number;      // rows of bricks per inch of height
+  planksPer: number;    // planks across one square
+  texture: number;      // 0..1 fine surface texture
+  finish: 'clean' | 'moss' | 'burnt' | 'decay' | 'vines' | 'cobwebs';
+  finishAmt: number;    // 0..1
+  caveItem: string;
+  dungeonItem: string;
+  forestItem: string;
+  trapItem: string;
   floorStrip: boolean;
   doorType: string;
   doorLeaf: boolean;
@@ -47,7 +60,9 @@ export function defaults(era = 'medieval', piece: PieceKind = 'floor'): Params {
     era, piece, seed: 1234,
     sx: 2, sy: 2, grid: 'in', wear: 0.25, detail: 1, base: 'flat', magnet: '6x3',
     floorStyle: e.floor[0].id, wallStyle: e.wall[0].id, top: e.top[0].id,
-    wallH: 2, wallT: 12, opening: 'none', floorStrip: true,
+    wallH: 2, wallT: 12, opening: 'none', openingPos: 'center', floorStrip: true,
+    popout: 1, joint: 0.8, bricksPer: 3, courses: 6, planksPer: 4, texture: 0.6, finish: 'clean', finishAmt: 0.5,
+    caveItem: 'wall', dungeonItem: 'bars', forestItem: 'oak', trapItem: e.traps[0].id,
     doorType: e.door[0].id, doorLeaf: true,
     pillarStyle: e.pillar[0].id, pillarH: 2.5, broken: false,
     stairsStyle: e.stairs[0].id, stairsH: 1, steps: 4, rails: false,
@@ -67,6 +82,8 @@ export function fitPiece(p: Params): Params {
   if (q.piece === 'scatter') { q.sx = 1; q.sy = 1; }
   if (q.piece === 'bridge') { q.sy = 1; q.sx = Math.max(q.sx, 3); }
   if (q.piece === 'stairs') { q.sy = Math.max(q.sy, 2); }
+  if (q.piece === 'cave') { q.sy = ['wall', 'corner', 'arch'].includes(q.caveItem) ? Math.max(1, q.sy) : q.sy; }
+  if (q.piece === 'trap') { q.sx = Math.max(2, q.sx); q.sy = Math.max(2, q.sy); }
   return q;
 }
 
@@ -79,6 +96,7 @@ export function switchEra(p: Params, era: string): Params {
     floorStyle: keep(p.floorStyle, e.floor), wallStyle: keep(p.wallStyle, e.wall), top: keep(p.top, e.top),
     doorType: keep(p.doorType, e.door), pillarStyle: keep(p.pillarStyle, e.pillar), stairsStyle: keep(p.stairsStyle, e.stairs),
     hillStyle: keep(p.hillStyle, e.ground), scatterItem: keep(p.scatterItem, e.scatter), bridgeStyle: keep(p.bridgeStyle, e.bridge),
+    trapItem: keep(p.trapItem, e.traps),
   };
 }
 
@@ -90,7 +108,7 @@ export function randomize(p: Params, seed = Date.now()): Params {
   if (p.piece === 'wall' || p.piece === 'corner' || p.piece === 'door') {
     q.wallStyle = r.pick(e.wall).id;
     q.top = r.pick(e.top).id;
-    if (p.piece === 'wall') q.opening = r.pick(['none', 'none', 'arch', 'window', 'broken'] as const);
+    if (p.piece === 'wall') q.opening = r.pick(['none', 'none', 'arch', 'pointed', 'window', 'slit', 'barred', 'twin', 'broken', 'crumbled']);
   }
   if (p.piece === 'door') q.doorType = r.pick(e.door).id;
   if (p.piece === 'pillar') { q.pillarStyle = r.pick(e.pillar).id; q.broken = r.chance(0.3); }
@@ -98,8 +116,17 @@ export function randomize(p: Params, seed = Date.now()): Params {
   if (p.piece === 'hill') { q.hillStyle = r.pick(e.ground).id; q.tiers = r.int(1, 3); q.rocks = r.range(0.2, 0.9); }
   if (p.piece === 'scatter') { q.scatterItem = r.pick(e.scatter).id; q.count = r.int(1, 4); }
   if (p.piece === 'bridge') q.bridgeStyle = r.pick(e.bridge).id;
+  if (p.piece === 'trap') q.trapItem = r.pick(e.traps).id;
   q.wear = Math.round(r.range(0, 0.7) * 20) / 20;
   return q;
 }
 
 export const ALL_ERAS = ERAS;
+
+export const OPENINGS = [
+  { id: 'none', label: 'None' }, { id: 'arch', label: 'Round arch' }, { id: 'pointed', label: 'Pointed arch' },
+  { id: 'square', label: 'Square door' }, { id: 'double', label: 'Double door' }, { id: 'window', label: 'Small window' },
+  { id: 'slit', label: 'Arrow slit' }, { id: 'barred', label: 'Barred window' }, { id: 'round', label: 'Round window' },
+  { id: 'twin', label: 'Twin windows' }, { id: 'broken', label: 'Blasted hole' }, { id: 'crumbled', label: 'Crumbled gap' },
+  { id: 'murder', label: 'Murder hole' }, { id: 'secret', label: 'Secret door' },
+];

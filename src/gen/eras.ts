@@ -16,16 +16,19 @@ export type Era = {
   bridge: Opt[];
   scatter: Opt[];
   ground: Opt[]; // hill/cliff surface
+  traps: Opt[];
   top: Opt[];    // wall tops
   paint: Partial<Record<Mat, string>>;
 };
 
 const o = (id: string, label: string): Opt => ({ id, label });
 
+// Realistic, weathered paint (desaturated, the way a well-painted table looks)
 const basePaint: Record<Mat, string> = {
-  base: '#3B3A37', stone: '#9C9488', stone2: '#7E776C', mortar: '#57524B', wood: '#8A5A33', wood2: '#6B4426',
-  metal: '#7D848C', metal2: '#565C63', brass: '#B58A3C', accent: '#9A2F2A', glow: '#58E1FF', ground: '#7A6A52',
-  grass: '#5E7A3A', cloth: '#C9B98F', crystal: '#9B7CFF', organic: '#7B4E6E', water: '#2F6F8F',
+  base: '#4A4640', stone: '#8A8378', stone2: '#6F695F', mortar: '#4D4842', wood: '#6E4E33', wood2: '#553B27',
+  metal: '#6E7378', metal2: '#4A4E53', brass: '#9C7A3C', accent: '#7E2E26', glow: '#58E1FF', ground: '#6B5A44',
+  grass: '#4E6233', cloth: '#A8997A', crystal: '#8F78E8', organic: '#6A4459', water: '#29505F',
+  moss: '#4F6A2C', char: '#2A2522', rust: '#7A4227', bark: '#4B3A2C', leaf: '#3F5A2A', bone: '#CFC5AE',
 };
 
 export const ERAS: Era[] = [
@@ -39,6 +42,7 @@ export const ERAS: Era[] = [
     bridge: [o('stonearch', 'Stone arch'), o('plank', 'Wooden planks')],
     scatter: [o('amphora', 'Amphorae'), o('urn', 'Urns'), o('brazier', 'Tripod brazier'), o('drum', 'Fallen column drums'), o('altar', 'Altar'), o('statue', 'Statue plinth'), o('rubble', 'Rubble')],
     ground: [o('sand', 'Desert sand'), o('grass', 'Grassy hill'), o('rock', 'Bare rock')],
+    traps: [o('spikepit', 'Spike pit'), o('boulder', 'Rolling boulder'), o('darts', 'Dart wall')],
     top: [o('flat', 'Flat'), o('cornice', 'Cornice'), o('broken', 'Ruined')],
     paint: { stone: '#C9BFA8', stone2: '#B0A48A', mortar: '#7F7666', accent: '#B0563A', brass: '#B98A3F', ground: '#C2A777' },
   },
@@ -52,6 +56,7 @@ export const ERAS: Era[] = [
     bridge: [o('stonearch', 'Stone arch'), o('plank', 'Plank bridge'), o('rope', 'Rope bridge')],
     scatter: [o('barrel', 'Barrels'), o('crate', 'Crates'), o('chest', 'Treasure chest'), o('table', 'Table'), o('bench', 'Benches'), o('brazier', 'Brazier'), o('sacks', 'Sacks'), o('bookcase', 'Bookcase'), o('rubble', 'Rubble')],
     ground: [o('grass', 'Grassy hill'), o('rock', 'Rocky cliff'), o('sand', 'Dirt')],
+    traps: [o('beartrap', 'Bear traps'), o('pendulum', 'Swinging blade'), o('spikepit', 'Spike pit'), o('pressure', 'Pressure plate')],
     top: [o('flat', 'Flat'), o('crenel', 'Battlements'), o('broken', 'Ruined')],
     paint: {},
   },
@@ -65,6 +70,7 @@ export const ERAS: Era[] = [
     bridge: [o('plank', 'Gangplank'), o('rope', 'Rope bridge'), o('stonearch', 'Stone arch')],
     scatter: [o('barrel', 'Barrels'), o('cannon', 'Cannon'), o('anchor', 'Anchor'), o('ropecoil', 'Rope coils'), o('crate', 'Cargo crates'), o('chest', 'Sea chest'), o('table', 'Tavern table')],
     ground: [o('sand', 'Beach dune'), o('grass', 'Grassy bluff'), o('rock', 'Sea cliff')],
+    traps: [o('trapdoor', 'Trapdoor'), o('powder', 'Powder kegs'), o('nettrap', 'Net trap')],
     top: [o('flat', 'Flat'), o('rail', 'Ship rail'), o('broken', 'Wrecked')],
     paint: { wood: '#7A5130', wood2: '#5A3A22', metal: '#3E3E3E', accent: '#1F3F66' },
   },
@@ -78,6 +84,7 @@ export const ERAS: Era[] = [
     bridge: [o('catwalk', 'Iron catwalk'), o('truss', 'Truss bridge'), o('plank', 'Plank bridge')],
     scatter: [o('gears', 'Gear stacks'), o('boiler', 'Boiler'), o('valve', 'Pipes & valve'), o('crate', 'Crates'), o('tesla', 'Tesla coil'), o('workbench', 'Workbench'), o('barrel', 'Barrels')],
     ground: [o('rock', 'Slag heap'), o('grass', 'Grassy hill'), o('sand', 'Coal dirt')],
+    traps: [o('sawblade', 'Saw blade'), o('steamvent', 'Steam vent'), o('teslatrap', 'Tesla pylons')],
     top: [o('flat', 'Flat'), o('rail', 'Railing'), o('broken', 'Wrecked')],
     paint: { metal: '#5A5048', metal2: '#3D3530', brass: '#C49A3A', stone: '#9B5A43', stone2: '#7E4634', accent: '#7A2E1E', glow: '#FFB547' },
   },
@@ -91,6 +98,7 @@ export const ERAS: Era[] = [
     bridge: [o('catwalk', 'Steel catwalk'), o('truss', 'Truss bridge')],
     scatter: [o('drum', 'Oil drums'), o('barrier', 'Jersey barrier'), o('sandbags', 'Sandbags'), o('pallet', 'Pallets & boxes'), o('cone', 'Traffic cones'), o('generator', 'Generator'), o('rubble', 'Rubble')],
     ground: [o('grass', 'Grassy hill'), o('rock', 'Rocky hill'), o('sand', 'Dirt')],
+    traps: [o('landmine', 'Landmine'), o('claymore', 'Tripwire mine'), o('barbed', 'Barbed wire')],
     top: [o('flat', 'Flat'), o('rail', 'Railing'), o('broken', 'Bombed out')],
     paint: { stone: '#A8A8A3', stone2: '#8C8C87', mortar: '#6C6C68', metal: '#6F767D', accent: '#C8A024', glow: '#FFE38A' },
   },
@@ -104,6 +112,7 @@ export const ERAS: Era[] = [
     bridge: [o('catwalk', 'Catwalk'), o('scifi', 'Skybridge')],
     scatter: [o('vending', 'Vending machine'), o('terminal', 'Terminal'), o('hazard', 'Hazard barrels'), o('scicrate', 'Crates'), o('spool', 'Cable spools'), o('sign', 'Neon sign')],
     ground: [o('rock', 'Rubble mound'), o('sand', 'Toxic dirt')],
+    traps: [o('laser', 'Laser grid'), o('shockfloor', 'Shock floor'), o('turret', 'Floor turret')],
     top: [o('flat', 'Flat'), o('rail', 'Railing'), o('broken', 'Smashed')],
     paint: { metal: '#3A3F4A', metal2: '#262A33', stone: '#6D6F75', stone2: '#575960', accent: '#FF2E88', glow: '#00F0FF', base: '#1B1D22' },
   },
@@ -117,6 +126,7 @@ export const ERAS: Era[] = [
     bridge: [o('scifi', 'Gantry bridge'), o('catwalk', 'Catwalk')],
     scatter: [o('cargopod', 'Cargo pods'), o('console', 'Console'), o('powercell', 'Power cells'), o('scicrate', 'Crates'), o('barricade', 'Barricade'), o('holotable', 'Holo table')],
     ground: [o('rock', 'Alien rock'), o('crater', 'Crater field'), o('sand', 'Dust plain')],
+    traps: [o('forcefield', 'Force field'), o('plasmavent', 'Plasma vent'), o('airlock', 'Floor airlock')],
     top: [o('flat', 'Flat'), o('rail', 'Railing'), o('broken', 'Hull breach')],
     paint: { metal: '#C9CDD3', metal2: '#8E949C', stone: '#B8BCC2', stone2: '#9AA0A8', accent: '#E0A33D', glow: '#4FD8FF', base: '#2A2E35' },
   },
@@ -130,6 +140,7 @@ export const ERAS: Era[] = [
     bridge: [o('organic', 'Living bridge'), o('stonearch', 'Stone arch')],
     scatter: [o('crystalcluster', 'Crystal clusters'), o('eggs', 'Egg pods'), o('stalks', 'Spore stalks'), o('bones', 'Giant bones'), o('rubble', 'Rubble')],
     ground: [o('crystalhill', 'Crystal hill'), o('rock', 'Alien rock'), o('crater', 'Crater')],
+    traps: [o('acid', 'Acid pool'), o('tentacle', 'Tentacle pit'), o('sporepod', 'Spore pods')],
     top: [o('flat', 'Smooth'), o('spikes', 'Spikes'), o('broken', 'Torn')],
     paint: { stone: '#6E5B78', stone2: '#574763', organic: '#8C4F73', crystal: '#61F2C2', glow: '#9CFF5E', ground: '#4B3D52', grass: '#3D6B5A' },
   },
@@ -141,7 +152,7 @@ export function paintFor(era: Era): Record<Mat, string> {
   return { ...basePaint, ...era.paint } as Record<Mat, string>;
 }
 
-export type PieceKind = 'floor' | 'wall' | 'corner' | 'door' | 'hill' | 'stairs' | 'pillar' | 'scatter' | 'bridge';
+export type PieceKind = 'floor' | 'wall' | 'corner' | 'door' | 'hill' | 'stairs' | 'pillar' | 'scatter' | 'bridge' | 'cave' | 'dungeon' | 'forest' | 'trap';
 export const PIECES: { id: PieceKind; label: string; icon: string; help: string }[] = [
   { id: 'floor', label: 'Floor', icon: '⬛', help: 'Floor tiles on the grid' },
   { id: 'wall', label: 'Wall', icon: '🧱', help: 'Straight wall sections' },
@@ -152,4 +163,12 @@ export const PIECES: { id: PieceKind; label: string; icon: string; help: string 
   { id: 'pillar', label: 'Pillar', icon: '🏛', help: 'Columns and supports' },
   { id: 'scatter', label: 'Scatter', icon: '🛢', help: 'Props: barrels, crates, consoles…' },
   { id: 'bridge', label: 'Bridge', icon: '🌉', help: 'Spans gaps between levels' },
+  { id: 'cave', label: 'Cave', icon: '🕳', help: 'Cave walls, floors, stalactites, boulders, pools' },
+  { id: 'dungeon', label: 'Dungeon', icon: '⛓', help: 'Bars, cells, cages, chains, rack, stocks' },
+  { id: 'forest', label: 'Forest', icon: '🌲', help: 'Trees, logs, stumps, a fallen tree, undergrowth' },
+  { id: 'trap', label: 'Trap', icon: '☠', help: 'A trap for every era' },
 ];
+
+export const CAVE: Opt[] = [o('wall', 'Cave wall'), o('corner', 'Cave corner'), o('floor', 'Cave floor'), o('arch', 'Cave arch with stalactites'), o('stalagmites', 'Stalagmites'), o('boulders', 'Boulder pile'), o('pool', 'Cave pool'), o('crystals', 'Crystal vein floor')];
+export const DUNGEON: Opt[] = [o('bars', 'Iron bars wall'), o('celldoor', 'Cell door'), o('cage', 'Hanging cage'), o('shackles', 'Wall shackles & chains'), o('drain', 'Drain floor'), o('rack', 'Torture rack'), o('stocks', 'Stocks'), o('bones', 'Chained skeleton')];
+export const FOREST: Opt[] = [o('pine', 'Pine tree'), o('oak', 'Oak tree'), o('dead', 'Dead tree'), o('fallen', 'Fallen tree caught in another'), o('logs', 'Log pile'), o('log', 'Fallen log'), o('stump', 'Stump with roots'), o('undergrowth', 'Ferns, bushes & mushrooms')];

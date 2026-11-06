@@ -1,12 +1,15 @@
 // Turns a set of settings into a finished, printable piece.
 import * as THREE from 'three';
-import { Builder, INCH, Rng, bounds, type Part } from './core';
+import { Builder, INCH, Rng, bounds, LOOK, type Part } from './core';
+import { cave, forest } from './nature';
+import { dungeon, trap } from './dungeon';
+import { applyFinish } from './finish';
 import { addBase, baseHeight, clipPiece } from './base';
 import { floorSurface, type Ctx } from './floors';
 import { wall, doorLeaf, holeFor, type Opening } from './walls';
 import { pillar, stairs, hill, bridge } from './terrain';
 import { scatter } from './props';
-import { eraById } from './eras';
+import { eraById, CAVE, DUNGEON, FOREST } from './eras';
 import { sqSize, type Params } from './params';
 
 export type Piece = { parts: Part[]; size: THREE.Vector3; box: THREE.Box3; name: string };
@@ -27,12 +30,19 @@ export function pieceName(p: Params) {
     case 'hill': return `${label(e.ground, p.hillStyle)} ${size}`;
     case 'scatter': return `${label(e.scatter, p.scatterItem)} x${p.count}`;
     case 'bridge': return `${label(e.bridge, p.bridgeStyle)} ${p.sx}`;
+    case 'cave': return `${label(CAVE, p.caveItem)} ${size}`;
+    case 'dungeon': return label(DUNGEON, p.dungeonItem);
+    case 'forest': return label(FOREST, p.forestItem);
+    case 'trap': return `${label(e.traps, p.trapItem)} trap`;
   }
 }
 
 export function generate(p: Params): Piece {
   const sq = sqSize(p);
-  const c: Ctx = { rng: new Rng(p.seed), sq, wear: p.wear, detail: p.detail, seed: p.seed, era: p.era };
+  LOOK.tex = p.texture ?? 0.6;
+  LOOK.popout = p.popout ?? 1;
+  LOOK.joint = p.joint ?? 0.8;
+  const c: Ctx = { rng: new Rng(p.seed), sq, wear: p.wear, detail: p.detail, seed: p.seed, era: p.era, courses: p.courses ?? 6, bricksPer: p.bricksPer ?? 3, planksPer: p.planksPer ?? 4 };
   const b = new Builder();
   const W = p.sx * sq, D = p.sy * sq;
   const era = eraById(p.era);
@@ -55,12 +65,12 @@ export function generate(p: Params): Piece {
         const g = new Builder();
         floorSurface(g, floorFor, L, fd, 0, c);
         for (const part of g.parts) b.add(part.geo, part.mat, { y, z: T / 2 });
-        wall(b.sub({ z: -sq / 2 + T / 2 }), { L, H, T, y0: y, style: p.wallStyle, top: p.top, opening, c });
-        if (p.piece === 'door' && p.doorLeaf && p.doorType !== 'none') addLeaf(b, p, { L, H, T, y0: y, style: p.wallStyle, top: p.top, opening, c }, sq / 2 + 6);
+        wall(b.sub({ z: -sq / 2 + T / 2 }), { L, H, T, y0: y, style: p.wallStyle, top: p.top, opening, pos: p.openingPos, c });
+        if (p.piece === 'door' && p.doorLeaf && p.doorType !== 'none') addLeaf(b, p, { L, H, T, y0: y, style: p.wallStyle, top: p.top, opening, pos: p.openingPos, c }, sq / 2 + 6);
       } else {
         const y = addBase(b, L, T + 2, p, centersAlong(L, sq));
-        wall(b, { L, H, T, y0: y, style: p.wallStyle, top: p.top, opening, c });
-        if (p.piece === 'door' && p.doorLeaf && p.doorType !== 'none') addLeaf(b, p, { L, H, T, y0: y, style: p.wallStyle, top: p.top, opening, c }, T / 2 + 6);
+        wall(b, { L, H, T, y0: y, style: p.wallStyle, top: p.top, opening, pos: p.openingPos, c });
+        if (p.piece === 'door' && p.doorLeaf && p.doorType !== 'none') addLeaf(b, p, { L, H, T, y0: y, style: p.wallStyle, top: p.top, opening, pos: p.openingPos, c }, T / 2 + 6);
       }
       break;
     }
@@ -120,7 +130,28 @@ export function generate(p: Params): Piece {
       bridge(b, p.bridgeStyle, W, D * 0.9, 0, c);
       break;
     }
+    case 'cave': {
+      const y = addBase(b, W, D, p);
+      cave(b, p.caveItem, W, D, p.wallH * INCH, y, p.floorStrip, c);
+      break;
+    }
+    case 'dungeon': {
+      const y = addBase(b, W, D, p);
+      dungeon(b, p.dungeonItem, W, D, p.wallH * INCH, y, c);
+      break;
+    }
+    case 'forest': {
+      const y = addBase(b, W, D, p);
+      forest(b, p.forestItem, W, D, p.pillarH * INCH, y, c);
+      break;
+    }
+    case 'trap': {
+      const y = addBase(b, W, D, p);
+      trap(b, p.trapItem, W, D, y, c);
+      break;
+    }
   }
+  applyFinish(b, p.finish ?? 'clean', p.finishAmt ?? 0.5, p.seed);
   const box = bounds(b.parts);
   // everything sits on the bed
   if (Math.abs(box.min.y) > 0.01) {

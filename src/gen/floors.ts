@@ -1,9 +1,9 @@
 // Floor surfaces. Each one fills a w×d area (centred on the origin) starting at height y, and returns the
 // height of its walking surface. Grid squares stay readable in every style so minis line up.
 import * as THREE from 'three';
-import { Builder, Rng, block, fbm, heightSlab, noise3, clamp, smoothstep, tube, lathe } from './core';
+import { Builder, Rng, block, fbm, heightSlab, noise3, clamp, smoothstep, tube, lathe, LOOK } from './core';
 
-export type Ctx = { rng: Rng; sq: number; wear: number; detail: number; seed: number; era: string };
+export type Ctx = { rng: Rng; sq: number; wear: number; detail: number; seed: number; era: string; courses: number; bricksPer: number; planksPer: number };
 
 const frac = (v: number) => v - Math.floor(v);
 
@@ -28,12 +28,13 @@ type FloorFn = (b: Builder, w: number, d: number, y: number, c: Ctx) => number;
 
 function flagstone(b: Builder, w: number, d: number, y: number, c: Ctx) {
   const { rng, sq, wear, detail } = c;
-  const gap = 0.9;
-  b.boxOn(w - 0.4, 1, d - 0.4, 'mortar', { y });
-  const nx = Math.round(w / sq), nz = Math.round(d / sq);
+  const gap = LOOK.joint * 1.1;
+  b.boxOn(w, 1, d, 'mortar', { y });
+  const nx = Math.max(1, Math.round(w / sq)), nz = Math.max(1, Math.round(d / sq));
   for (let i = 0; i < nx; i++)
     for (let j = 0; j < nz; j++) {
-      const x0 = -w / 2 + i * sq, z0 = -d / 2 + j * sq;
+      const cw = w / nx, cd = d / nz;
+      const x0 = -w / 2 + i * cw, z0 = -d / 2 + j * cd;
       // split each square into 1–4 stones
       const rects: [number, number, number, number][] = [];
       const split = (x: number, z: number, sw: number, sd: number, depth: number) => {
@@ -48,11 +49,11 @@ function flagstone(b: Builder, w: number, d: number, y: number, c: Ctx) {
           split(x, z + sd * k, sw, sd * (1 - k), depth + 1);
         }
       };
-      split(x0, z0, sq, sq, 0);
+      split(x0, z0, cw, cd, 0);
       for (const [x, z, sw, sd] of rects) {
         const missing = wear > 0.3 && rng.chance((wear - 0.3) * 0.25);
-        const h = (missing ? 0.6 : rng.range(1.5, 2.1)) * detail;
-        const tilt = wear * 0.05;
+        const h = (missing ? 0.6 : rng.range(1.5, 2.1) * LOOK.popout) * detail;
+        const tilt = wear * 0.02;
         b.block(sw - gap, h + 1, sd - gap, missing ? 'mortar' : rng.chance(0.5) ? 'stone' : 'stone2', {
           x: x + sw / 2, z: z + sd / 2, y: y + (h + 1) / 2, rx: rng.soft() * tilt, rz: rng.soft() * tilt, ry: rng.soft() * 0.02,
         }, { bevel: 0.7, noise: 0.45 * detail, freq: 0.45, seed: rng.int(1, 9999), flatTop: true, chip: wear, res: 1.4 });
@@ -64,10 +65,10 @@ function flagstone(b: Builder, w: number, d: number, y: number, c: Ctx) {
 
 function ashlar(b: Builder, w: number, d: number, y: number, c: Ctx) {
   const { rng, sq, wear, detail } = c;
-  b.boxOn(w - 0.4, 1, d - 0.4, 'mortar', { y });
-  const nz = Math.round(d / sq);
+  b.boxOn(w, 1, d, 'mortar', { y });
+  const nz = Math.max(1, Math.round(d / sq));
   for (let j = 0; j < nz * 2; j++) {
-    const rowD = sq / 2;
+    const rowD = d / (nz * 2);
     let x = -w / 2;
     const off = j % 2 ? sq / 2 : 0;
     const cuts = [-w / 2];
@@ -88,7 +89,7 @@ function ashlar(b: Builder, w: number, d: number, y: number, c: Ctx) {
 
 function mosaic(b: Builder, w: number, d: number, y: number, c: Ctx) {
   const { rng, sq, wear } = c;
-  b.boxOn(w - 0.4, 1.2, d - 0.4, 'mortar', { y });
+  b.boxOn(w, 1.2, d, 'mortar', { y });
   const t = sq / 10; // ten tesserae per square
   const nx = Math.round(w / t), nz = Math.round(d / t);
   const cx = nx / 2, cz = nz / 2;
@@ -110,8 +111,8 @@ function mosaic(b: Builder, w: number, d: number, y: number, c: Ctx) {
 function brickFloor(b: Builder, w: number, d: number, y: number, c: Ctx) {
   // basket weave: each quarter square holds two bricks, turned every other quarter
   const { rng, sq, wear, detail } = c;
-  b.boxOn(w - 0.4, 1, d - 0.4, 'mortar', { y });
-  const q = sq / 2;
+  b.boxOn(w, 1, d, 'mortar', { y });
+  const q = sq / Math.max(1, Math.round(c.bricksPer / 1.5));
   const nx = Math.round(w / q), nz = Math.round(d / q);
   for (let i = 0; i < nx; i++)
     for (let j = 0; j < nz; j++) {
@@ -131,8 +132,8 @@ function brickFloor(b: Builder, w: number, d: number, y: number, c: Ctx) {
 
 function cobble(b: Builder, w: number, d: number, y: number, c: Ctx) {
   const { rng, wear, detail } = c;
-  b.boxOn(w - 0.4, 1.2, d - 0.4, 'mortar', { y });
-  const s = 4.3;
+  b.boxOn(w, 1.2, d, 'mortar', { y });
+  const s = c.sq / Math.max(3, c.bricksPer * 2);
   const nx = Math.floor(w / s), nz = Math.floor(d / s);
   const ox = (w - nx * s) / 2, oz = (d - nz * s) / 2;
   for (let i = 0; i < nx; i++)
@@ -179,7 +180,7 @@ function dirt(b: Builder, w: number, d: number, y: number, c: Ctx) {
 
 function plankRun(b: Builder, w: number, d: number, y: number, c: Ctx, pw: number, caulk: number, deck: boolean) {
   const { rng, wear, detail, sq } = c;
-  b.boxOn(w - 0.4, 1, d - 0.4, 'wood2', { y });
+  b.boxOn(w, 1, d, 'wood2', { y });
   const rows = Math.round(d / pw);
   const realW = d / rows;
   for (let j = 0; j < rows; j++) {
@@ -199,10 +200,10 @@ function plankRun(b: Builder, w: number, d: number, y: number, c: Ctx, pw: numbe
       if (len < 2) { x += len; continue; }
       const sd = rng.int(1, 9999);
       const broken = wear > 0.4 && rng.chance((wear - 0.4) * 0.3);
-      const h = (broken ? 0.4 : 1.7) * detail;
+      const h = (broken ? 0.4 : 1.2 + 0.5 * LOOK.popout) * detail;
       const grain = (gx: number, gz: number) => {
         const g = Math.sin(gz * 3.1 + fbm(gx * 0.04, gz * 0.4, 0, sd, 3) * 5);
-        const lines = -0.22 * detail * Math.pow(Math.abs(g), 10);
+        const lines = -(0.12 + LOOK.tex * 0.25) * detail * Math.pow(Math.abs(g), 8);
         const knot = Math.hypot((gx - (sd % 13) + 6) * 0.5, gz) < 1 ? -0.25 : 0;
         return lines + knot + wear * 0.25 * fbm(gx * 0.2, gz * 0.2, 7, sd, 2);
       };
@@ -221,11 +222,11 @@ function plankRun(b: Builder, w: number, d: number, y: number, c: Ctx, pw: numbe
 }
 
 function planks(b: Builder, w: number, d: number, y: number, c: Ctx) {
-  return plankRun(b, w, d, y, c, c.sq / 4, 0.55, false);
+  return plankRun(b, w, d, y, c, c.sq / c.planksPer, LOOK.joint * 0.7, false);
 }
 
 function deck(b: Builder, w: number, d: number, y: number, c: Ctx) {
-  const top = plankRun(b, w, d, y, c, c.sq / 5, 0.7, true);
+  const top = plankRun(b, w, d, y, c, c.sq / (c.planksPer + 1), LOOK.joint * 0.9, true);
   // a cargo grating hatch on larger decks
   if (w >= c.sq * 2 && d >= c.sq * 2) {
     const hw = c.sq * 1.1;
@@ -253,8 +254,8 @@ export function rivetRow(b: Builder, x0: number, z0: number, x1: number, z1: num
 
 function ironplate(b: Builder, w: number, d: number, y: number, c: Ctx) {
   const { rng, sq, wear, detail } = c;
-  b.boxOn(w - 0.4, 1, d - 0.4, 'metal2', { y });
-  const nx = Math.round(w / sq), nz = Math.round(d / sq);
+  b.boxOn(w, 1, d, 'metal2', { y });
+  const nx = Math.max(1, Math.round(w / sq)), nz = Math.max(1, Math.round(d / sq));
   const h = 1.4 * detail;
   for (let i = 0; i < nx; i++)
     for (let j = 0; j < nz; j++) {
@@ -284,8 +285,8 @@ function ironplate(b: Builder, w: number, d: number, y: number, c: Ctx) {
 function grate(b: Builder, w: number, d: number, y: number, c: Ctx) {
   const { sq, rng, wear } = c;
   // lower floor seen through the grating, then frames and bars per square
-  b.boxOn(w - 0.4, 1, d - 0.4, 'metal2', { y });
-  const nx = Math.round(w / sq), nz = Math.round(d / sq);
+  b.boxOn(w, 1, d, 'metal2', { y });
+  const nx = Math.max(1, Math.round(w / sq)), nz = Math.max(1, Math.round(d / sq));
   const H = 3;
   for (let i = 0; i < nx; i++)
     for (let j = 0; j < nz; j++) {
@@ -473,7 +474,7 @@ function scifiplate(b: Builder, w: number, d: number, y: number, c: Ctx) {
     return h;
   });
   b.add(g, 'metal', { y });
-  const nx = Math.round(w / sq), nz = Math.round(d / sq);
+  const nx = Math.max(1, Math.round(w / sq)), nz = Math.max(1, Math.round(d / sq));
   for (let i = 0; i < nx; i++)
     for (let j = 0; j < nz; j++) {
       const x = -w / 2 + (i + 0.5) * sq, z = -d / 2 + (j + 0.5) * sq;

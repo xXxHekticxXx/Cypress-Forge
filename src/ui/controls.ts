@@ -1,6 +1,6 @@
 // What the "Make it yours" panel shows for each piece. `simple` controls stay visible in Simple mode.
-import { eraById, type Opt } from '../gen/eras';
-import type { Params } from '../gen/params';
+import { eraById, CAVE, DUNGEON, FOREST, type Opt } from '../gen/eras';
+import { OPENINGS, type Params } from '../gen/params';
 
 export type Control =
   | { kind: 'slider'; key: keyof Params; label: string; min: number; max: number; step: number; fmt: (v: number) => string; simple?: boolean; help?: string }
@@ -17,6 +17,16 @@ export function controlsFor(p: Params): Control[] {
   const common: Control[] = [
     { kind: 'slider', key: 'wear', label: 'Wear and damage', min: 0, max: 1, step: 0.05, fmt: wearName, simple: true, help: 'From freshly built to falling apart: chips, cracks, missing stones and rubble.' },
     { kind: 'slider', key: 'detail', label: 'Detail depth', min: 0.5, max: 1.6, step: 0.05, fmt: (v) => `${Math.round(v * 100)} %`, help: 'How deep textures and grooves are. Higher shows up better after painting; lower prints faster.' },
+    { kind: 'slider', key: 'texture', label: 'Surface texture', min: 0, max: 1, step: 0.05, fmt: (v) => (v < 0.1 ? 'Smooth' : v < 0.4 ? 'Light' : v < 0.75 ? 'Strong' : 'Very rough'), simple: true, help: 'Grain, pitting and tool marks on stone and wood. Print at 0.12–0.16 mm layers to keep it.' },
+    { kind: 'choice', key: 'finish', label: 'Finish', simple: true, options: [{ id: 'clean', label: 'Clean' }, { id: 'moss', label: '🌿 Moss' }, { id: 'burnt', label: '🔥 Burnt' }, { id: 'decay', label: '🕸 Decaying' }, { id: 'vines', label: 'Vines' }, { id: 'cobwebs', label: 'Cobwebs' }], help: 'Ages any piece. Moss and webs are raised shapes you paint.' },
+    ...(p.finish !== 'clean' ? [{ kind: 'slider', key: 'finishAmt', label: 'How much', min: 0.1, max: 1, step: 0.05, fmt: (v: number) => (v < 0.35 ? 'A little' : v < 0.7 ? 'Some' : 'Lots') } as Control] : []),
+  ];
+  const masonry: Control[] = [
+    { kind: 'slider', key: 'popout', label: 'Brick / stone pop-out', min: 0.2, max: 3, step: 0.1, fmt: (v) => `${v.toFixed(1)} mm`, simple: true, help: 'How far bricks and stones stand out from the mortar.' },
+    { kind: 'slider', key: 'joint', label: 'Joint / gap width', min: 0.3, max: 2, step: 0.1, fmt: (v) => `${v.toFixed(1)} mm`, help: 'Gap between bricks, stones and planks.' },
+    { kind: 'slider', key: 'bricksPer', label: 'Bricks along a square', min: 1, max: 8, step: 1, fmt: (v) => `${v}` },
+    { kind: 'slider', key: 'courses', label: 'Rows of bricks per inch', min: 3, max: 12, step: 1, fmt: (v) => `${v}` },
+    { kind: 'slider', key: 'planksPer', label: 'Planks per square', min: 2, max: 8, step: 1, fmt: (v) => `${v}` },
   ];
   const base: Control[] = [
     { kind: 'choice', key: 'base', label: 'Base', simple: true, options: [{ id: 'flat', label: 'Flat' }, { id: 'magnet', label: 'Magnets' }, { id: 'clip', label: 'Clip slots' }, { id: 'none', label: 'No base' }], help: 'Magnets hold tiles together on a steel sheet or each other. Clip slots take the little clips you can add to the print set.' },
@@ -29,13 +39,17 @@ export function controlsFor(p: Params): Control[] {
     { kind: 'slider', key: 'wallH', label: 'Wall height', min: 1, max: 3, step: 0.25, fmt: inch, simple: true, help: '2 inches is a classic dungeon wall; 1.5 inches lets you reach in to move minis.' },
     { kind: 'slider', key: 'wallT', label: 'Wall thickness', min: 6, max: 20, step: 1, fmt: (v) => `${v} mm` },
     { kind: 'choice', key: 'top', label: 'Top of the wall', options: e.top },
-    ...(opening ? [{ kind: 'choice', key: 'opening', label: 'Opening', simple: true, options: [{ id: 'none', label: 'None' }, { id: 'arch', label: 'Arch' }, { id: 'square', label: 'Doorway' }, { id: 'window', label: 'Window' }, { id: 'broken', label: 'Blasted hole' }] } as Control] : []),
+    ...(opening ? [
+      { kind: 'choice', key: 'opening', label: 'Opening', simple: true, options: OPENINGS } as Control,
+      ...(p.opening !== 'none' ? [{ kind: 'choice', key: 'openingPos', label: 'Where', options: [{ id: 'center', label: 'Center' }, { id: 'left', label: 'Left' }, { id: 'right', label: 'Right' }, { id: 'two', label: 'Two of them' }] } as Control] : []),
+    ] : []),
+    ...masonry,
     { kind: 'toggle', key: 'floorStrip', label: 'Wall stands on a floor tile', help: 'Dungeon-tile style: the wall sits on the back edge of a floor square, so walls and floors line up on the grid.' },
   ];
 
   switch (p.piece) {
     case 'floor':
-      return [{ kind: 'size', maxX: 6, maxY: 6, simple: true }, { kind: 'choice', key: 'floorStyle', label: 'Floor style', options: e.floor, simple: true }, ...common, ...base, grid];
+      return [{ kind: 'size', maxX: 6, maxY: 6, simple: true }, { kind: 'choice', key: 'floorStyle', label: 'Floor style', options: e.floor, simple: true }, ...masonry, ...common, ...base, grid];
     case 'wall':
       return [{ kind: 'size', maxX: 6, maxY: 1, lockY: true, simple: true, label: 'Length' }, ...wallCtl(true), { kind: 'choice', key: 'floorStyle', label: 'Floor style (on the tile)', options: e.floor }, ...common, ...base, grid];
     case 'corner':
@@ -49,7 +63,7 @@ export function controlsFor(p: Params): Control[] {
       return [{ kind: 'choice', key: 'pillarStyle', label: 'Pillar style', options: e.pillar, simple: true },
         { kind: 'slider', key: 'pillarH', label: 'Height', min: 1, max: 4, step: 0.25, fmt: inch, simple: true },
         { kind: 'toggle', key: 'broken', label: 'Broken / fallen top', simple: true },
-        { kind: 'choice', key: 'floorStyle', label: 'Floor under it', options: e.floor }, ...common, ...base, grid];
+        { kind: 'choice', key: 'floorStyle', label: 'Floor under it', options: e.floor }, ...masonry, ...common, ...base, grid];
     case 'stairs':
       return [{ kind: 'size', maxX: 4, maxY: 4, simple: true }, { kind: 'choice', key: 'stairsStyle', label: 'Stairs style', options: e.stairs, simple: true },
         { kind: 'slider', key: 'stairsH', label: 'Climbs up', min: 0.5, max: 3, step: 0.25, fmt: inch, simple: true },
@@ -69,6 +83,20 @@ export function controlsFor(p: Params): Control[] {
     case 'bridge':
       return [{ kind: 'size', maxX: 8, maxY: 2, simple: true, label: 'Span' }, { kind: 'choice', key: 'bridgeStyle', label: 'Bridge style', options: e.bridge, simple: true }, ...common, grid];
   }
+  const H = { kind: 'slider', key: 'wallH', label: 'Height', min: 1, max: 3.5, step: 0.25, fmt: inch, simple: true } as Control;
+  switch (p.piece) {
+    case 'cave':
+      return [{ kind: 'choice', key: 'caveItem', label: 'Cave piece', options: CAVE, simple: true }, { kind: 'size', maxX: 6, maxY: 6, simple: true }, H,
+        ...(p.caveItem === 'wall' ? [{ kind: 'toggle', key: 'floorStrip', label: 'Wall stands on a floor tile' } as Control] : []), ...common, ...base, grid];
+    case 'dungeon':
+      return [{ kind: 'choice', key: 'dungeonItem', label: 'Dungeon piece', options: DUNGEON, simple: true }, { kind: 'size', maxX: 4, maxY: 4, simple: true }, H, ...masonry, ...common, ...base, grid];
+    case 'forest':
+      return [{ kind: 'choice', key: 'forestItem', label: 'Forest piece', options: FOREST, simple: true }, { kind: 'size', maxX: 6, maxY: 6, simple: true },
+        { kind: 'slider', key: 'pillarH', label: 'Tree height', min: 1.5, max: 6, step: 0.25, fmt: inch, simple: true }, ...common, ...base, grid];
+    case 'trap':
+      return [{ kind: 'choice', key: 'trapItem', label: 'Trap', options: e.traps, simple: true }, { kind: 'size', maxX: 4, maxY: 4, simple: true }, ...common, ...base, grid];
+  }
+  return [];
 }
 
 export function defaultValue(key: keyof Params, p: Params, d: Params) {

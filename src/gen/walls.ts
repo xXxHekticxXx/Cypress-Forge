@@ -2,90 +2,157 @@
 // Masonry walls are built course by course from blocks that go right through the wall, so both faces are
 // detailed; other styles have a core with panels, timbers, pipes or ribs on both faces.
 import * as THREE from 'three';
-import { Builder, Rng, fbm, noise3, clamp, polyShape, smoothstep, tube, arcTorus } from './core';
+import { Builder, Rng, fbm, noise3, clamp, polyShape, smoothstep, tube, arcTorus, inPoly, LOOK } from './core';
 import { rubble, crystalCluster, topBox, type Ctx } from './floors';
 
 const MODERN = ['cinder', 'concretewall', 'cyberwall'];
 
-export type Opening = 'none' | 'arch' | 'square' | 'window' | 'broken' | 'door' | 'doorArch';
+export type Opening = string;
 
 export type WallSpec = {
   L: number; H: number; T: number; y0: number;
-  style: string; top: string; opening: Opening;
+  style: string; top: string; opening: Opening; pos?: 'center' | 'left' | 'right' | 'two';
   c: Ctx;
 };
 
-type Hole = {
+type HoleDef = {
   kind: Opening;
   x: number; w: number;
   bottom: number;  // from y0
   spring: number;  // where an arch starts (or the top of a square opening)
-  arch: boolean;
-  blob?: (a: number) => number; // broken hole radius by angle
+  arch: boolean;   // round top
+  pointed?: boolean;
+  poly: [number, number][];
+  reaches: boolean; // opens at the floor (a doorway)
   cy?: number; r?: number;
+  blob?: (a: number) => number;
 };
+/** The first opening, plus every opening in `all` (twin windows, two doors…). */
+type Hole = HoleDef & { all: HoleDef[] };
 
-function makeHole(s: WallSpec): Hole | null {
-  const { L, H, c, opening } = s;
-  const sq = c.sq;
-  if (opening === 'none' || L < sq * 0.9) return null;
-  const maxTop = H - 5;
-  if (opening === 'door' || opening === 'square') {
-    const w = Math.min(sq * 0.86, L - 8), top = Math.min(sq * 1.45, maxTop);
-    return { kind: opening, x: 0, w, bottom: 0, spring: top, arch: false };
+function archPts(x: number, hw: number, spring: number, pointed: boolean, n = 24): [number, number][] {
+  const pts: [number, number][] = [];
+  if (!pointed) {
+    for (let i = 1; i < n; i++) { const a = Math.PI - (i / n) * Math.PI; pts.push([x + Math.cos(a) * hw, spring + Math.sin(a) * hw]); }
+  } else {
+    // equilateral (Gothic) arch: two arcs of radius w meeting at a point
+    const R = hw * 2;
+    for (let i = 1; i <= n / 2; i++) { const a = Math.PI - (i / (n / 2)) * (Math.PI / 3); pts.push([x + hw + Math.cos(a) * R, spring + Math.sin(a) * R]); }
+    for (let i = n / 2 - 1; i >= 1; i--) { const a = (i / (n / 2)) * (Math.PI / 3); pts.push([x - hw + Math.cos(a) * R, spring + Math.sin(a) * R]); }
   }
-  if (opening === 'arch' || opening === 'doorArch') {
-    const w = Math.min(sq * 0.9, L - 8);
-    const spring = Math.min(sq * 1.12, maxTop - w / 2);
-    return { kind: opening, x: 0, w, bottom: 0, spring, arch: true };
-  }
-  if (opening === 'window') {
-    const w = Math.min(sq * 0.42, L - 10);
-    const bottom = Math.min(sq * 0.85, H * 0.45);
-    const spring = Math.min(bottom + sq * 0.5, maxTop - w / 2);
-    return { kind: opening, x: 0, w, bottom, spring, arch: true };
-  }
-  // broken: a ragged blast hole
-  const rng = c.rng.fork(77);
-  const r = Math.min(sq * 0.55, H * 0.32, L * 0.32);
-  const seed = rng.int(1, 9999);
-  return {
-    kind: 'broken', x: rng.range(-L * 0.12, L * 0.12), w: r * 2, bottom: 0, spring: 0, arch: false,
-    cy: H * 0.5, r, blob: (a) => r * (0.75 + 0.35 * noise3(Math.cos(a) * 1.6, Math.sin(a) * 1.6, 0, seed)),
-  };
+  return pts;
 }
 
-/** Is (x, y-from-y0) inside the opening, grown by margin m? */
+function def(kind: Opening, x: number, w: number, bottom: number, spring: number, arch: boolean, pointed = false): HoleDef {
+  const hw = w / 2;
+  const b = bottom <= 0.01 ? -2 : bottom; // doorways reach below the floor line so tests near y=0 work
+  const poly: [number, number][] = [[x - hw, b], [x + hw, b], [x + hw, spring], ...(arch || pointed ? archPts(x, hw, spring, pointed) : []), [x - hw, spring]];
+  return { kind, x, w, bottom, spring, arch: arch || pointed, pointed, poly, reaches: bottom <= 0.01 };
+}
+
+export function holeTop(d: HoleDef) {
+  return d.pointed ? d.spring + d.w * 0.866 : d.arch ? d.spring + d.w / 2 : d.spring;
+}
+
+function makeHole(s: WallSpec): Hole | null {
+  const { L, H, c } = s;
+  let opening = s.opening;
+  const sq = c.sq;
+  if (['none', 'crumbled', 'secret'].includes(opening) || L < sq * 0.9) return null;
+  if (opening === 'door') opening = 'square';
+  if (opening === 'doorArch') opening = 'arch';
+  const maxTop = H - 5;
+  const two = s.pos === 'two' && L >= sq * 1.9;
+  const xs = two ? [-L / 4, L / 4] : [s.pos === 'left' && L >= sq * 1.9 ? -L / 4 : s.pos === 'right' && L >= sq * 1.9 ? L / 4 : 0];
+  const roomAll = two ? L / 2 - 6 : L - 8;
+  const defs: HoleDef[] = [];
+  for (let x of xs) {
+    // never let an opening run past the end of the wall
+    if (opening === 'double' && !two) x = 0;
+    const room = Math.min(roomAll, 2 * (L / 2 - Math.abs(x)) - 8);
+    switch (opening) {
+      case 'square': { const w = Math.min(sq * 0.86, room); defs.push(def('square', x, w, 0, Math.min(sq * 1.45, maxTop), false)); break; }
+      case 'double': { const w = Math.min(sq * 1.55, room); defs.push(def('double', x, w, 0, Math.min(sq * 1.5, maxTop), false)); break; }
+      case 'arch': { const w = Math.min(sq * 0.9, room); defs.push(def('arch', x, w, 0, Math.min(sq * 1.12, maxTop - w / 2), true)); break; }
+      case 'pointed': { const w = Math.min(sq * 0.86, room); defs.push(def('pointed', x, w, 0, Math.min(sq * 0.95, maxTop - w * 0.866), false, true)); break; }
+      case 'window': { const w = Math.min(sq * 0.42, room); const bot = Math.min(sq * 0.85, H * 0.45); defs.push(def('window', x, w, bot, Math.min(bot + sq * 0.5, maxTop - w / 2), true)); break; }
+      case 'slit': { const w = 2.8; const bot = Math.min(sq * 0.7, H * 0.35); defs.push(def('slit', x, w, bot, Math.min(bot + sq * 0.85, maxTop - 2), true)); break; }
+      case 'barred': { const w = Math.min(sq * 0.6, room); const bot = Math.min(sq * 0.8, H * 0.4); defs.push(def('barred', x, w, bot, Math.min(bot + sq * 0.6, maxTop), false)); break; }
+      case 'murder': { const w = Math.min(sq * 0.26, room); const bot = Math.min(H * 0.68, maxTop - w - 2); defs.push(def('murder', x, w, bot, bot + w, false)); break; }
+      case 'twin': { const w = Math.min(sq * 0.3, room / 2.6); const bot = Math.min(sq * 0.85, H * 0.45); for (const e of [-1, 1]) defs.push(def('twin', x + e * w * 0.75, w, bot, Math.min(bot + sq * 0.45, maxTop - w / 2), true)); break; }
+      case 'round': {
+        const r = Math.min(sq * 0.27, room / 2, (H - 8) / 2.4);
+        const cy = Math.min(H * 0.6, H - r - 5);
+        const poly: [number, number][] = [];
+        for (let i = 0; i < 40; i++) { const a = (i / 40) * Math.PI * 2; poly.push([x + Math.cos(a) * r, cy + Math.sin(a) * r]); }
+        defs.push({ kind: 'round', x, w: r * 2, bottom: cy - r, spring: cy + r, arch: false, poly, reaches: false, cy, r });
+        break;
+      }
+      default: {
+        // broken: a ragged blast hole
+        const rng = c.rng.fork(77 + defs.length);
+        const r = Math.min(sq * 0.55, H * 0.32, (two ? L / 2 : L) * 0.32);
+        const seed = rng.int(1, 9999);
+        const cy = H * 0.5, hx = x + rng.range(-L * 0.06, L * 0.06);
+        const blob = (a: number) => r * (0.75 + 0.35 * noise3(Math.cos(a) * 1.6, Math.sin(a) * 1.6, 0, seed));
+        const poly: [number, number][] = [];
+        for (let i = 0; i < 48; i++) { const a = (i / 48) * Math.PI * 2; poly.push([hx + Math.cos(a) * blob(a), cy + Math.sin(a) * blob(a)]); }
+        defs.push({ kind: 'broken', x: hx, w: r * 2, bottom: cy - r, spring: cy + r, arch: false, poly, reaches: false, cy, r, blob });
+      }
+    }
+  }
+  return { ...defs[0], all: defs };
+}
+
+/** Is (x, y-from-y0) inside an opening, grown by margin m? */
 function inHole(h: Hole | null, x: number, y: number, m: number) {
   if (!h) return false;
-  if (h.kind === 'broken') {
-    const dx = x - h.x, dy = y - h.cy!;
-    const a = Math.atan2(dy, dx);
-    return Math.hypot(dx, dy) < h.blob!(a) + m;
+  for (const d of h.all) {
+    if (inPoly(d.poly, x, y)) return true;
+    if (m > 0) for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      if (inPoly(d.poly, x + Math.cos(a) * m, y + Math.sin(a) * m)) return true;
+    }
   }
-  const hw = h.w / 2;
-  if (y < h.bottom - m) return false;
-  if (h.arch && y > h.spring) {
-    return Math.hypot(x - h.x, y - h.spring) < hw + m;
-  }
-  return Math.abs(x - h.x) < hw + m && y < h.spring + m;
+  return false;
 }
 
 function topProfile(s: WallSpec, hole: Hole | null = null): (x: number) => number {
   const raw = rawTop(s);
-  if (!hole || hole.bottom <= 0.01 && hole.kind !== 'broken' && hole.kind !== 'window') {
-    // a doorway: keep at least a lintel's worth of wall over it
-    if (!hole) return raw;
-    const need = hole.spring + (hole.arch ? hole.w / 2 : 0) + 6;
-    return (x) => (Math.abs(x - hole.x) < hole.w / 2 + 7 ? Math.max(raw(x), Math.min(s.H, need)) : raw(x));
-  }
-  // windows and blast holes must stay inside the wall, even when the top is ruined
-  const holeTop = hole.kind === 'broken' ? hole.cy! + hole.r! * 1.15 + 3 : hole.spring + hole.w / 2 + 4;
-  const reach = hole.kind === 'broken' ? hole.r! * 1.2 + 4 : hole.w / 2 + 6;
-  return (x) => (Math.abs(x - hole.x) < reach ? Math.max(raw(x), Math.min(s.H, holeTop)) : raw(x));
+  if (!hole) return raw;
+  // keep openings inside the wall even when the top is ruined: a lintel's worth of wall over each one
+  const keep = hole.all.map((d) => ({ x: d.x, reach: d.w / 2 + 6, need: Math.min(s.H, holeTop(d) + (d.reaches ? 6 : 4)) }));
+  return (x) => {
+    let y = raw(x);
+    for (const k of keep) if (Math.abs(x - k.x) < k.reach) y = Math.max(y, k.need);
+    return y;
+  };
 }
 
 function rawTop(s: WallSpec): (x: number) => number {
+  const { H, top, c, L } = s;
+  if (top === 'crenel') {
+    const merlon = 8, gap = 6.5, drop = 7;
+    return (x) => {
+      const t = ((x + L / 2) % (merlon + gap) + (merlon + gap)) % (merlon + gap);
+      return t < merlon ? H : H - drop;
+    };
+  }
+  if (s.opening === 'crumbled') {
+    // a V-shaped breach crumbling down from the top
+    const seed = c.seed + 17;
+    const gx = c.rng.fork(19).range(-L * 0.15, L * 0.15), gw = Math.min(c.sq * 0.75, L * 0.3);
+    const base = rawTopNoGap(s);
+    return (x) => {
+      const t = Math.abs(x - gx) / gw;
+      const dip = t < 1 ? (1 - t * t) * H * 0.62 : 0;
+      return Math.max(H * 0.3, base(x) - dip - (t < 1.3 ? Math.abs(noise3(x * 0.5, 2, 0, seed)) * 3 : 0));
+    };
+  }
+  return rawTopNoGap(s);
+}
+
+function rawTopNoGap(s: WallSpec): (x: number) => number {
   const { H, top, c, L } = s;
   if (top === 'crenel') {
     const merlon = 8, gap = 6.5, drop = 7;
@@ -102,20 +169,16 @@ function rawTop(s: WallSpec): (x: number) => number {
   return () => H;
 }
 
-/** Outline of the wall face (x along the wall, y up) with the opening cut in. */
+/** Outline of the wall face (x along the wall, y up) with the openings cut in. */
 function outline(s: WallSpec, hole: Hole | null, topY: (x: number) => number) {
   const { L } = s;
-  const pts: [number, number][] = [];
-  const reachesBottom = hole && hole.bottom <= 0.01 && hole.kind !== 'broken';
-  pts.push([-L / 2, 0]);
-  if (reachesBottom) {
-    const hw = hole!.w / 2, x0 = hole!.x - hw, x1 = hole!.x + hw;
-    pts.push([x0, 0], [x0, hole!.spring]);
-    if (hole!.arch) for (let i = 1; i < 24; i++) {
-      const a = Math.PI - (i / 24) * Math.PI;
-      pts.push([hole!.x + Math.cos(a) * hw, hole!.spring + Math.sin(a) * hw]);
-    }
-    pts.push([x1, hole!.spring], [x1, 0]);
+  const pts: [number, number][] = [[-L / 2, 0]];
+  const doors = (hole?.all ?? []).filter((d) => d.reaches).sort((a, b) => a.x - b.x);
+  for (const d of doors) {
+    const hw = d.w / 2;
+    pts.push([d.x - hw, 0], [d.x - hw, d.spring]);
+    if (d.arch) pts.push(...archPts(d.x, hw, d.spring, !!d.pointed).slice().reverse().map(([x, y]) => [2 * d.x - x, y] as [number, number]));
+    pts.push([d.x + hw, d.spring], [d.x + hw, 0]);
   }
   pts.push([L / 2, 0]);
   const steps = Math.max(8, Math.round(L / 0.8));
@@ -124,25 +187,13 @@ function outline(s: WallSpec, hole: Hole | null, topY: (x: number) => number) {
     pts.push([x, topY(x)]);
   }
   const shape = polyShape(pts);
-  if (hole && !reachesBottom) {
-    const hp: [number, number][] = [];
-    if (hole.kind === 'broken') {
-      for (let i = 0; i < 40; i++) {
-        const a = (i / 40) * Math.PI * 2;
-        const r = hole.blob!(a);
-        hp.push([hole.x + Math.cos(a) * r, hole.cy! + Math.sin(a) * r]);
-      }
-    } else {
-      const hw = hole.w / 2;
-      hp.push([hole.x - hw, hole.bottom], [hole.x + hw, hole.bottom], [hole.x + hw, hole.spring]);
-      for (let i = 1; i < 24; i++) {
-        const a = (i / 24) * Math.PI;
-        hp.push([hole.x + Math.cos(a) * hw, hole.spring + Math.sin(a) * hw]);
-      }
-      hp.push([hole.x - hw, hole.spring]);
-    }
+  let hi = 0;
+  for (const d of hole?.all ?? []) {
+    if (d.reaches) continue;
+    // nudge each extra hole a hair so no two share a straight edge line (keeps the triangulation watertight)
+    const dy = hi++ * 0.07;
     const p = new THREE.Path();
-    hp.forEach(([x, y], i) => (i ? p.lineTo(x, y) : p.moveTo(x, y)));
+    d.poly.forEach(([x, y], i) => (i ? p.lineTo(x, y + dy) : p.moveTo(x, y + dy)));
     shape.holes.push(p);
   }
   return shape;
@@ -206,7 +257,7 @@ export function wall(b: Builder, s: WallSpec) {
     const r = s.c.rng.fork(9);
     const n = Math.round(2 + s.c.wear * 6 + (hole?.kind === 'broken' ? 4 : 0));
     for (let i = 0; i < n; i++) {
-      const x = hole?.kind === 'broken' && i < 4 ? hole.x + r.soft() * hole.r! : r.range(-s.L / 2 + 3, s.L / 2 - 3);
+      const x = hole?.kind === 'broken' && i < 4 ? hole.x + r.soft() * (hole.r ?? 5) : r.range(-s.L / 2 + 3, s.L / 2 - 3);
       const side = r.chance(0.5) ? 1 : -1;
       rubble(b, x, side * (s.T / 2 + r.range(1.5, 4)), s.y0, r.range(1.5, 3), r, 2);
     }
@@ -217,18 +268,22 @@ function masonryCourses(b: Builder, s: WallSpec, hole: Hole | null, topY: (x: nu
   const { style, T, y0, c } = s;
   const rng = c.rng.fork(1);
   const d = c.detail;
+  // brick size comes from the settings: rows per inch and bricks per square
+  const bh = 25.4 / Math.max(2, c.courses), bl = c.sq / Math.max(1, c.bricksPer);
+  const J = LOOK.joint;
   const spec: Record<string, { ch: [number, number]; len: [number, number]; noise: number; joint: number; bond: boolean; mats: ('stone' | 'stone2')[] }> = {
-    brick: { ch: [4.2, 4.2], len: [8.6, 8.6], noise: 0.25, joint: 0.75, bond: true, mats: ['stone', 'stone2'] },
-    pipes: { ch: [4.2, 4.2], len: [8.6, 8.6], noise: 0.25, joint: 0.75, bond: true, mats: ['stone', 'stone2'] },
-    ashlar: { ch: [8, 9.5], len: [11, 21], noise: 0.18, joint: 0.6, bond: false, mats: ['stone', 'stone2'] },
-    fieldstone: { ch: [4.2, 7.5], len: [5, 13], noise: 0.75, joint: 0.9, bond: false, mats: ['stone', 'stone2'] },
-    crystalwall: { ch: [4.5, 8], len: [6, 14], noise: 0.75, joint: 0.9, bond: false, mats: ['stone', 'stone2'] },
-    cinder: { ch: [3.7, 3.7], len: [7.4, 7.4], noise: 0.12, joint: 0.5, bond: true, mats: ['stone', 'stone2'] },
-    concretewall: { ch: [s.H / 3, s.H / 3], len: [c.sq, c.sq], noise: 0.1, joint: 0.55, bond: false, mats: ['stone', 'stone'] },
-    cyberwall: { ch: [s.H / 4, s.H / 4], len: [c.sq / 2, c.sq], noise: 0.08, joint: 0.6, bond: true, mats: ['metal', 'metal2'] as any },
+    brick: { ch: [bh, bh], len: [bl, bl], noise: 0.25, joint: J, bond: true, mats: ['stone', 'stone2'] },
+    pipes: { ch: [bh, bh], len: [bl, bl], noise: 0.25, joint: J, bond: true, mats: ['stone', 'stone2'] },
+    ashlar: { ch: [bh * 1.8, bh * 2.2], len: [bl * 1.2, bl * 2.4], noise: 0.18, joint: J * 0.8, bond: false, mats: ['stone', 'stone2'] },
+    fieldstone: { ch: [bh, bh * 1.8], len: [bl * 0.6, bl * 1.5], noise: 0.75, joint: J * 1.1, bond: false, mats: ['stone', 'stone2'] },
+    crystalwall: { ch: [bh, bh * 1.9], len: [bl * 0.7, bl * 1.6], noise: 0.75, joint: J * 1.1, bond: false, mats: ['stone', 'stone2'] },
+    cinder: { ch: [bh * 0.9, bh * 0.9], len: [bl * 0.85, bl * 0.85], noise: 0.12, joint: J * 0.7, bond: true, mats: ['stone', 'stone2'] },
+    concretewall: { ch: [s.H / 3, s.H / 3], len: [c.sq, c.sq], noise: 0.1, joint: J * 0.7, bond: false, mats: ['stone', 'stone'] },
+    cyberwall: { ch: [s.H / 4, s.H / 4], len: [c.sq / 2, c.sq], noise: 0.08, joint: J * 0.8, bond: true, mats: ['metal', 'metal2'] as any },
   };
   const k = spec[style] ?? spec.brick;
-  const margin = (y: number) => (hole && hole.arch && y > hole.spring - 1 ? 5.6 : hole?.kind === 'broken' ? 0.2 : 0.35);
+  // keep clear of the arch stones above each arched opening
+  const margin = (y: number) => (hole && hole.all.some((d) => d.arch && d.kind !== 'slit' && y > d.spring - 1) && !MODERN.includes(style) ? 5.6 : hole?.kind === 'broken' ? 0.2 : 0.35);
   let y = 0, course = 0;
   const maxTop = Math.max(...Array.from({ length: 41 }, (_, i) => topY(-s.L / 2 + (i / 40) * s.L)));
   while (y < maxTop - 0.5) {
@@ -252,7 +307,8 @@ function masonryCourses(b: Builder, s: WallSpec, hole: Hole | null, topY: (x: nu
           const mat = k.mats[rng.int(0, 1)] as any;
           const missing = c.wear > 0.45 && rng.chance((c.wear - 0.45) * 0.08);
           const proud = style === 'fieldstone' || style === 'crystalwall' ? rng.range(-0.3, 0.5) : 0;
-          if (!missing) b.block(len - k.joint, hgt - k.joint, T + proud * 2, mat, {
+          const depth = T - 2 + 2 * Math.max(0.15, LOOK.popout) + proud * 2; // pop-out past the mortar core
+          if (!missing) b.block(len - k.joint, hgt - k.joint, depth, mat, {
             x: x + len / 2, y: y0 + y + hgt / 2, z: style === 'fieldstone' ? rng.soft() * 0.3 : 0,
             rz: style === 'fieldstone' ? rng.soft() * 0.04 : 0,
           }, {
@@ -269,26 +325,41 @@ function masonryCourses(b: Builder, s: WallSpec, hole: Hole | null, topY: (x: nu
     y += ch;
     course++;
   }
-  // arch voussoirs / lintel / sill (modern walls get a steel frame instead, see doorFrame)
-  if (hole && hole.kind !== 'broken' && !MODERN.includes(style)) {
-    const hw = hole.w / 2;
-    if (hole.arch) {
-      const R = hw + 2.8;
-      const n = Math.max(5, Math.round((Math.PI * R) / 4.6) | 1);
+  // arch stones / lintels / sills for every opening (modern walls get a steel frame instead, see doorFrame)
+  if (hole && !MODERN.includes(style)) for (const h of hole.all) {
+    if (h.kind === 'broken' || h.kind === 'round') {
+      if (h.kind === 'round') {
+        const R = h.r! + 2.6, n = Math.max(8, Math.round((Math.PI * 2 * R) / 4.6));
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          b.block((Math.PI * 2 * R) / n - 0.5, 5, T + 0.6, 'stone', { x: h.x + Math.cos(a) * R, y: y0 + h.cy! + Math.sin(a) * R, rz: a - Math.PI / 2 }, { bevel: 0.6, noise: 0.2 * d, seed: rng.int(1, 9999), res: 1.2 });
+        }
+      }
+      continue;
+    }
+    const hw = h.w / 2;
+    if (h.arch && h.kind !== 'slit') {
+      // stones radiating around the arch (round or pointed), keystone on top
+      const ring = archPts(h.x, hw, h.spring, !!h.pointed, 40);
+      const total = ring.reduce((acc, p, i) => (i ? acc + Math.hypot(p[0] - ring[i - 1][0], p[1] - ring[i - 1][1]) : 0), 0);
+      const n = Math.max(5, Math.round(total / 4.6) | 1);
       for (let i = 0; i < n; i++) {
-        const a = Math.PI - ((i + 0.5) / n) * Math.PI;
+        const t = ((i + 0.5) / n) * (ring.length - 1);
+        const k0 = Math.floor(t), f = t - k0;
+        const p0 = ring[k0], p1 = ring[Math.min(ring.length - 1, k0 + 1)];
+        const px = p0[0] + (p1[0] - p0[0]) * f, py = p0[1] + (p1[1] - p0[1]) * f;
+        const ang = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]); // tangent
+        const nx = -Math.sin(ang), ny = Math.cos(ang);    // outward normal
         const key = i === (n - 1) / 2;
-        const tw = (Math.PI * R) / n - 0.5;
-        b.block(key ? tw + 1 : tw, key ? 6.5 : 5.2, T + 0.6, 'stone', {
-          x: hole.x + Math.cos(a) * (R + (key ? 0.6 : 0)), y: y0 + hole.spring + Math.sin(a) * (R + (key ? 0.6 : 0)), rz: a - Math.PI / 2,
+        b.block(total / n - 0.5 + (key ? 1 : 0), key ? 6.5 : 5.2, T - 2 + 2 * LOOK.popout + 0.6, 'stone', {
+          x: px + nx * (2.6 + (key ? 0.6 : 0)), y: y0 + py + ny * (2.6 + (key ? 0.6 : 0)), rz: ang,
         }, { bevel: 0.6, noise: 0.2 * d + c.wear * 0.2, seed: rng.int(1, 9999), res: 1.2 });
       }
-      // springer stones
-      for (const e of [-1, 1]) b.block(6.5, 3, T + 0.6, 'stone2', { x: hole.x + e * (hw + 2.6), y: y0 + hole.spring - 1.5 }, { bevel: 0.5, noise: 0.15, seed: rng.int(1, 999) });
+      for (const e of [-1, 1]) b.block(6.5, 3, T + 0.6, 'stone2', { x: h.x + e * (hw + 2.6), y: y0 + h.spring - 1.5 }, { bevel: 0.5, noise: 0.15, seed: rng.int(1, 999) });
     } else {
-      b.block(hole.w + 9, 5, T + 0.6, 'stone', { x: hole.x, y: y0 + hole.spring + 2.5 }, { bevel: 0.7, noise: 0.2 * d, seed: rng.int(1, 9999) });
+      b.block(h.w + 9, 5, T + 0.6, 'stone', { x: h.x, y: y0 + holeTop(h) + 2.5 }, { bevel: 0.7, noise: 0.2 * d, seed: rng.int(1, 9999) });
     }
-    if (hole.kind === 'window') b.block(hole.w + 5, 2.4, T + 2.4, 'stone', { x: hole.x, y: y0 + hole.bottom - 1.2 }, { bevel: 0.5, noise: 0.15, seed: 5 });
+    if (!h.reaches) b.block(h.w + 5, 2.4, T + 2.4, 'stone', { x: h.x, y: y0 + h.bottom - 1.2 }, { bevel: 0.5, noise: 0.15, seed: 5 });
   }
 }
 
@@ -329,7 +400,7 @@ function timber(b: Builder, s: WallSpec, hole: Hole | null, topY: (x: number) =>
 function plankWall(b: Builder, s: WallSpec, hole: Hole | null, topY: (x: number) => number) {
   const { T, y0, c, H } = s;
   const rng = c.rng.fork(3);
-  const ph = 5.2;
+  const ph = Math.max(2.6, (c.sq / c.planksPer) * 0.82);
   for (let y = 0; y < H - 1; y += ph) {
     const runs = freeRuns(s, hole, topY, y, Math.min(H, y + ph), () => 0.4);
     for (const [a, z] of runs) {
@@ -545,22 +616,45 @@ function wallTop(b: Builder, s: WallSpec, topY: (x: number) => number, hole: Hol
 }
 
 function doorFrame(b: Builder, s: WallSpec, hole: Hole | null) {
-  if (!hole || hole.kind === 'broken') return;
   const { T, y0, style } = s;
-  const hw = hole.w / 2;
+  // iron bars across barred windows (any wall style)
+  for (const h of hole?.all ?? []) if (h.kind === 'barred') {
+    const n = Math.max(3, Math.round(h.w / 3.4));
+    for (let i = 1; i < n; i++) b.cyl(0.65, 0.65, h.spring - h.bottom + 2, 'metal2', { x: h.x - h.w / 2 + (i * h.w) / n, y: y0 + (h.bottom + h.spring) / 2 }, 8);
+    b.box(h.w + 1, 1, 1.4, 'metal2', { x: h.x, y: y0 + (h.bottom + h.spring) / 2 });
+  }
+  if (s.opening === 'secret') {
+    // a hidden door: just a hairline seam and a loose stone to press
+    const w = Math.min(s.c.sq * 0.86, s.L - 8), top = Math.min(s.c.sq * 1.45, s.H - 6);
+    for (const side of [1]) {
+      const z = side * (T / 2 - 2 + LOOK.popout + 0.25);
+      b.box(0.6, top, 0.5, 'mortar', { x: -w / 2, y: y0 + top / 2, z });
+      b.box(0.6, top, 0.5, 'mortar', { x: w / 2, y: y0 + top / 2, z });
+      b.box(w, 0.6, 0.5, 'mortar', { x: 0, y: y0 + top, z });
+      b.block(3.2, 2.6, 0.8, 'stone2', { x: w / 2 + 4, y: y0 + top * 0.55, z: z + 0.3 }, { bevel: 0.3, noise: 0.2, seed: 3 });
+    }
+  }
   const masonry = ['brick', 'ashlar', 'fieldstone', 'pipes', 'crystalwall'].includes(style);
-  if (masonry) return;
+  if (!hole || masonry) return;
   const mat = style === 'timber' || style === 'planks' ? 'wood' : style === 'organic' ? 'organic' : style === 'concretewall' || style === 'cinder' ? 'stone2' : 'metal2';
   const fw = 2.4;
-  const top = hole.spring + (hole.arch ? hw : 0);
-  for (const e of [-1, 1]) b.block(fw, hole.spring - hole.bottom + (hole.arch ? 0 : fw), T + 1.2, mat, { x: hole.x + e * (hw + fw / 2), y: y0 + hole.bottom + (hole.spring - hole.bottom + (hole.arch ? 0 : fw)) / 2 }, { bevel: 0.5, res: 2 });
-  if (hole.arch) {
-    const curve = arcTorus(hw + fw / 2, fw / 2, 8, 24, Math.PI);
-    b.add(curve, mat, { x: hole.x, y: y0 + hole.spring, sz: (T + 1.2) / fw });
-  } else b.block(hole.w + fw * 2, fw, T + 1.2, mat, { x: hole.x, y: y0 + top + fw / 2 }, { bevel: 0.5, res: 2 });
-  if (style === 'bulkhead' || style === 'scifipanel') {
-    // hazard chevrons on the frame
-    for (let y = hole.bottom + 2; y < hole.spring - 2; y += 3) for (const e of [-1, 1]) b.box(1.2, 1.6, 0.5, 'accent', { x: hole.x + e * (hw + fw / 2), y: y0 + y, z: T / 2 + 0.85, rz: e * 0.7 });
+  for (const h of hole.all) {
+    if (h.kind === 'broken' || h.kind === 'round') continue;
+    const hw = h.w / 2;
+    const jambH = h.spring - h.bottom + (h.arch ? 0 : fw);
+    for (const e of [-1, 1]) b.block(fw, jambH, T + 1.2, mat, { x: h.x + e * (hw + fw / 2), y: y0 + h.bottom + jambH / 2 }, { bevel: 0.5, res: 2 });
+    if (h.arch && !h.pointed) {
+      b.add(arcTorus(hw + fw / 2, fw / 2, 8, 24, Math.PI), mat, { x: h.x, y: y0 + h.spring, sz: (T + 1.2) / fw });
+    } else if (h.pointed) {
+      const ring = archPts(h.x, hw + fw / 2, h.spring, true, 24);
+      for (let i = 1; i < ring.length; i++) {
+        const [x0, yA] = ring[i - 1], [x1, yB] = ring[i];
+        b.block(Math.hypot(x1 - x0, yB - yA) + 0.6, fw, T + 1.2, mat, { x: (x0 + x1) / 2, y: y0 + (yA + yB) / 2, rz: Math.atan2(yB - yA, x1 - x0) }, { bevel: 0.3, res: 2 });
+      }
+    } else b.block(h.w + fw * 2, fw, T + 1.2, mat, { x: h.x, y: y0 + holeTop(h) + fw / 2 }, { bevel: 0.5, res: 2 });
+    if (style === 'bulkhead' || style === 'scifipanel') {
+      for (let y = h.bottom + 2; y < h.spring - 2; y += 3) for (const e of [-1, 1]) b.box(1.2, 1.6, 0.5, 'accent', { x: h.x + e * (hw + fw / 2), y: y0 + y, z: T / 2 + 0.85, rz: e * 0.7 });
+    }
   }
 }
 
@@ -666,5 +760,6 @@ function archShape(w: number, h: number) {
 export function holeFor(s: WallSpec) {
   return makeHole(s);
 }
+export { archPts };
 
 export { inHole, smoothstep };

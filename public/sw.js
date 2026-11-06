@@ -1,5 +1,5 @@
 // Offline: keep every file of the app after the first visit. New versions are picked up on the next start.
-const CACHE = 'forge-v1';
+const CACHE = 'forge-v2';
 self.addEventListener('install', (e) => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', (e) => {

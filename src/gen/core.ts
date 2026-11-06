@@ -81,7 +81,11 @@ export const smoothstep = (a: number, b: number, v: number) => {
 
 export type Mat =
   | 'base' | 'stone' | 'stone2' | 'mortar' | 'wood' | 'wood2' | 'metal' | 'metal2' | 'brass'
-  | 'accent' | 'glow' | 'ground' | 'grass' | 'cloth' | 'crystal' | 'organic' | 'water';
+  | 'accent' | 'glow' | 'ground' | 'grass' | 'cloth' | 'crystal' | 'organic' | 'water'
+  | 'moss' | 'char' | 'rust' | 'bark' | 'leaf' | 'bone';
+
+/** Settings that every generator reads while a piece is being built (set by generate()). */
+export const LOOK = { tex: 0.6, popout: 1, joint: 0.8 };
 
 export type Part = { geo: THREE.BufferGeometry; mat: Mat };
 
@@ -196,8 +200,10 @@ export type BlockOpts = {
  */
 export function block(w: number, h: number, d: number, o: BlockOpts = {}) {
   const bevel = Math.min(o.bevel ?? 0.6, w / 2 - 0.01, h / 2 - 0.01, d / 2 - 0.01);
-  const res = o.res ?? 1.6;
-  const sx = clamp(Math.round(w / res), 2, 40), sy = clamp(Math.round(h / res), 2, 40), sz = clamp(Math.round(d / res), 2, 40);
+  const natural = (o.noise ?? 0) > 0.05;
+  const tex = natural ? LOOK.tex : 0;
+  const res = Math.min(o.res ?? 1.6, tex > 0.3 ? 1.6 - tex * 0.6 : 99);
+  const sx = clamp(Math.round(w / res), 2, 48), sy = clamp(Math.round(h / res), 2, 48), sz = clamp(Math.round(d / res), 2, 48);
   const g = new THREE.BoxGeometry(w, h, d, sx, sy, sz);
   const pos = g.attributes.position as THREE.BufferAttribute;
   const hx = w / 2 - bevel, hy = h / 2 - bevel, hz = d / 2 - bevel;
@@ -218,6 +224,11 @@ export function block(w: number, h: number, d: number, o: BlockOpts = {}) {
       const topness = o.flatTop ? smoothstep(h / 2 - 0.3, h / 2, v.y) : 0;
       const k = amp * (1 - 0.8 * topness);
       r += k * fbm(v.x * fq, v.y * fq, v.z * fq, seed, 3) - k * 0.35;
+      // fine surface texture: grain, pits and tool marks (printable at 0.12-0.2 mm layers)
+      if (tex > 0) {
+        const kt = tex * (1 - 0.6 * topness);
+        r += kt * (0.22 * noise3(v.x * 1.4, v.y * 1.4, v.z * 1.4, seed + 77) - 0.16 * Math.pow(Math.abs(noise3(v.x * 0.9, v.y * 0.9, v.z * 0.9, seed + 5)), 3) * 2.2);
+      }
       // chipped corners: bite out where two or three faces meet
       if (chip > 0) {
         const corner = (Math.abs(v.x) > w / 2 - 1.5 ? 1 : 0) + (Math.abs(v.y) > h / 2 - 1.5 ? 1 : 0) + (Math.abs(v.z) > d / 2 - 1.5 ? 1 : 0);
@@ -428,4 +439,61 @@ export function arcTorus(R: number, r: number, radial: number, tubular: number, 
     pts.push(new THREE.Vector3(Math.cos(a) * R, Math.sin(a) * R, 0));
   }
   return tube(new THREE.CatmullRomCurve3(pts), tubular * 2, r, radial);
+}
+
+
+/** Point inside a polygon (even-odd rule). */
+export function inPoly(pts: [number, number][], x: number, y: number) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Tapered tube with bark: deep vertical furrows, knots and a little twist. Closed at both ends.
+ * Used for trunks, branches, roots and logs.
+ */
+export function barkTube(curve: THREE.Curve<THREE.Vector3>, r0: number, r1: number, segs: number, radial: number, seed: number, bark = 1) {
+  const frames = curve.computeFrenetFrames(segs, false);
+  const verts: number[] = [];
+  const idx: number[] = [];
+  const P = new THREE.Vector3(), N = new THREE.Vector3();
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    curve.getPointAt(t, P);
+    const R = r0 + (r1 - r0) * t;
+    for (let j = 0; j < radial; j++) {
+      const a = (j / radial) * Math.PI * 2;
+      const furrow = Math.pow(Math.abs(Math.sin(a * Math.max(3, Math.round(R * 2.2)) + noise3(t * 6, 0, 0, seed) * 2)), 0.6);
+      const knot = Math.max(0, noise3(Math.cos(a) * 2, Math.sin(a) * 2, t * segs * 0.25, seed + 3) - 0.55) * 1.4;
+      const rr = R * (1 + bark * (0.1 * furrow - 0.06 + 0.05 * noise3(a * 3, t * 20, 1, seed + 1) + knot * 0.25));
+      N.copy(frames.normals[i]).multiplyScalar(Math.cos(a)).addScaledVector(frames.binormals[i], Math.sin(a));
+      verts.push(P.x + N.x * rr, P.y + N.y * rr, P.z + N.z * rr);
+    }
+  }
+  for (let i = 0; i < segs; i++) for (let j = 0; j < radial; j++) {
+    const a = i * radial + j, b = i * radial + ((j + 1) % radial), c = (i + 1) * radial + j, d = (i + 1) * radial + ((j + 1) % radial);
+    idx.push(a, c, b, b, c, d);
+  }
+  // caps (slightly domed so a cut log end shows growth rings when ringed later)
+  const cap = (ring: number, end: number, sign: number) => {
+    curve.getPointAt(end, P);
+    const ci = verts.length / 3;
+    const T = curve.getTangentAt(end).multiplyScalar(sign * 0.2);
+    verts.push(P.x + T.x, P.y + T.y, P.z + T.z);
+    for (let j = 0; j < radial; j++) {
+      const a = ring * radial + j, b = ring * radial + ((j + 1) % radial);
+      sign > 0 ? idx.push(ci, a, b) : idx.push(ci, b, a);
+    }
+  };
+  cap(0, 0, -1);
+  cap(segs, 1, 1);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
 }
