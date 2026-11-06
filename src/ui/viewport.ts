@@ -38,7 +38,7 @@ float h3(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * 
 float vn(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f*f*(3.0-2.0*f);
   return mix(mix(mix(h3(i+vec3(0,0,0)),h3(i+vec3(1,0,0)),f.x), mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),f.x),f.y),
              mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),f.x), mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),f.x),f.y), f.z); }
-float fbm3(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++){ s += a * vn(p); p *= 2.03; a *= 0.5; } return s; }`)
+float fbm3(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++){ s += a * vn(p); p *= 2.03; a *= 0.5; } return s; }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
 float mott = fbm3(vWPos * uDetail.x * 0.35) - 0.5;
 float speck = vn(vWPos * uDetail.x * 6.0) - 0.5;
@@ -88,10 +88,12 @@ export class Viewport {
   private down: THREE.Vector2 | null = null;
 
   constructor(private host: HTMLElement, hq: boolean) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(hq ? 2 : 1.5, window.devicePixelRatio));
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.hq = hq;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // shadows only change when pieces change, not when the camera turns
+    this.renderer.shadowMap.autoUpdate = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
     host.appendChild(this.renderer.domElement);
@@ -102,7 +104,7 @@ export class Viewport {
     this.scene.add(new THREE.HemisphereLight('#e6ecff', '#2a241e', 0.32));
     this.sun = new THREE.DirectionalLight('#fff1e0', 2.3);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(4096, 4096);
+    this.sun.shadow.mapSize.set(hq ? 4096 : 2048, hq ? 4096 : 2048);
     this.sun.shadow.bias = -0.0003;
     this.sun.shadow.normalBias = 0.25;
     this.sun.shadow.radius = 3;
@@ -118,7 +120,9 @@ export class Viewport {
     this.controls.maxPolarAngle = Math.PI * 0.49;
     this.controls.minDistance = 25;
     this.controls.maxDistance = 2500;
-    this.controls.addEventListener('change', () => (this.dirty = true));
+    this.controls.addEventListener('change', () => { this.dirty = true; this.lastMove = performance.now(); });
+    this.controls.addEventListener('start', () => { this.moving = true; this.lastMove = performance.now(); });
+    this.controls.addEventListener('end', () => { this.moving = false; this.lastMove = performance.now(); });
     if (hq) {
       try {
         const rt = new THREE.WebGLRenderTarget(1, 1, { samples: 4, type: THREE.HalfFloatType });
@@ -139,8 +143,27 @@ export class Viewport {
     const loop = () => {
       this.raf = requestAnimationFrame(loop);
       this.controls.update();
-      if (this.dirty) {
+      const now = performance.now();
+      // while the camera turns or a piece is dragged: quick, lower-resolution frames with no extra effects.
+      // once it settles: one full-quality frame.
+      const busy = this.moving || !!this.drag?.moved || now - this.lastMove < 180;
+      if (this.shadowDirty && (!busy || now - this.lastShadow > 150)) {
+        this.renderer.shadowMap.needsUpdate = true;
+        this.shadowDirty = false;
+        this.lastShadow = now;
+        this.dirty = true;
+      }
+      if (busy) {
+        if (this.dirty) {
+          this.dirty = false;
+          this.setFast(true);
+          this.renderer.render(this.scene, this.camera);
+          this.needFull = true;
+        }
+      } else if (this.dirty || this.needFull) {
         this.dirty = false;
+        this.needFull = false;
+        this.setFast(false);
         if (this.composer && this.aoOn) this.composer.render();
         else this.renderer.render(this.scene, this.camera);
       }
@@ -148,10 +171,34 @@ export class Viewport {
     loop();
   }
 
+  private hq = false;
+  private moving = false;
+  private lastMove = 0;
+  private needFull = false;
+  private shadowDirty = true;
+  private lastShadow = 0;
+  private fast = false;
+  /** Pixel ratio that keeps the picture under a pixel budget (4K screens would otherwise draw 8+ million pixels a frame). */
+  private ratio(fast: boolean) {
+    const w = this.host.clientWidth || 1, h = this.host.clientHeight || 1;
+    const budget = fast ? (this.hq ? 1.1e6 : 0.6e6) : this.hq ? 3.7e6 : 2.1e6;
+    return Math.max(0.35, Math.min(window.devicePixelRatio || 1, this.hq ? 2 : 1.5, Math.sqrt(budget / (w * h))));
+  }
+  private setFast(on: boolean) {
+    if (on === this.fast) return;
+    this.fast = on;
+    this.renderer.setPixelRatio(this.ratio(on));
+    const w = this.host.clientWidth, h = this.host.clientHeight;
+    if (w && h) this.renderer.setSize(w, h, false);
+    // the effect pass stays at full-quality size; it is skipped while moving
+  }
+
   resize() {
     const w = this.host.clientWidth, h = this.host.clientHeight;
     if (!w || !h) return;
+    this.renderer.setPixelRatio(this.ratio(this.fast));
     this.renderer.setSize(w, h, false);
+    this.composer?.setPixelRatio(this.ratio(false));
     this.composer?.setSize(w, h);
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
@@ -249,6 +296,7 @@ export class Viewport {
     }
     this.updateSel();
     this.fitShadows();
+    this.shadowDirty = true;
     this.dirty = true;
   }
 
@@ -299,6 +347,7 @@ export class Viewport {
     this.board.add(lines);
     this.mini.position.set(-W / 2 - 22, 0, D / 2 - 12);
     this.fitShadows();
+    this.shadowDirty = true;
     this.dirty = true;
   }
 
@@ -311,12 +360,12 @@ export class Viewport {
     m?.color.set(plate);
     this.dirty = true;
   }
-  setShadows(on: boolean) { this.sun.castShadow = on; this.renderer.shadowMap.needsUpdate = true; this.dirty = true; }
+  setShadows(on: boolean) { this.sun.castShadow = on; this.shadowDirty = true; this.dirty = true; }
   setAO(on: boolean) { this.aoOn = on; this.dirty = true; }
   setRotateSpeed(v: number) { this.controls.rotateSpeed = v; this.controls.zoomSpeed = v; }
   gridOn = true;
   setGrid(on: boolean) { this.gridOn = on; this.board.children[1] && (this.board.children[1].visible = on); this.dirty = true; }
-  setMini(on: boolean) { this.mini.visible = on; this.dirty = true; }
+  setMini(on: boolean) { this.mini.visible = on; this.shadowDirty = true; this.dirty = true; }
 
   /** Point the camera at one piece, or at the whole board. */
   frame(id?: string | null) {
@@ -377,6 +426,7 @@ export class Viewport {
       const e = this.groups.get(this.drag.id);
       if (!e) return;
       const [x, z] = this.snap(this.drag.id, g.x + this.drag.off.x, g.z + this.drag.off.z);
+      if (e.g.position.x !== x || e.g.position.z !== z) this.shadowDirty = true;
       e.g.position.x = x;
       e.g.position.z = z;
       this.updateSel();
@@ -420,6 +470,7 @@ export class Viewport {
 
   /** JPEG of the current view, or of one piece on its own (for print-set cards). */
   snapshot(w = 220, h = 160) {
+    this.setFast(false);
     if (this.composer) this.composer.render(); else this.renderer.render(this.scene, this.camera);
     const src = this.renderer.domElement;
     const c = document.createElement('canvas');
