@@ -35,7 +35,7 @@ export const ERAS: Era[] = [
   {
     id: 'ancient', name: 'Ancient', icon: '🏛', blurb: 'Greek, Roman, Egyptian, ruins',
     floor: [o('ashlar', 'Marble blocks'), o('mosaic', 'Mosaic'), o('flagstone', 'Flagstone'), o('dirt', 'Sand & dirt'), o('rough', 'Cave rock')],
-    wall: [o('ashlar', 'Marble blocks'), o('fieldstone', 'Rubble stone'), o('brick', 'Roman brick')],
+    wall: [o('marble', 'Greek marble (drafted blocks)'), o('incertum', 'Roman rubble (opus incertum)'), o('romanbrick', 'Roman brick & net-stone (opus mixtum)')],
     door: [o('bronze', 'Bronze doors'), o('wood', 'Wooden door'), o('none', 'Open doorway')],
     pillar: [o('doric', 'Doric column'), o('ionic', 'Ionic column'), o('egypt', 'Egyptian papyrus'), o('obelisk', 'Obelisk')],
     stairs: [o('stone', 'Marble steps'), o('rough', 'Carved rock')],
@@ -49,7 +49,7 @@ export const ERAS: Era[] = [
   {
     id: 'medieval', name: 'Medieval', icon: '🏰', blurb: 'Castles, dungeons, villages',
     floor: [o('flagstone', 'Flagstone'), o('cobble', 'Cobblestone'), o('brick', 'Brick'), o('planks', 'Wood planks'), o('dirt', 'Dirt & straw'), o('rough', 'Cave rock')],
-    wall: [o('brick', 'Brick'), o('ashlar', 'Cut stone'), o('fieldstone', 'Fieldstone'), o('timber', 'Timber frame'), o('planks', 'Wood planks')],
+    wall: [o('ashlar', 'Castle stone (rock-faced, quoins)'), o('brick', 'Handmade brick (Flemish bond)'), o('fieldstone', 'Fieldstone rubble'), o('timber', 'Tudor timber & daub'), o('planks', 'Board & batten')],
     door: [o('wood', 'Iron-bound door'), o('portcullis', 'Portcullis'), o('none', 'Open doorway')],
     pillar: [o('pier', 'Stone pier'), o('round', 'Round column'), o('post', 'Wooden post'), o('statue', 'Knight statue')],
     stairs: [o('stone', 'Stone steps'), o('wood', 'Wooden steps'), o('rough', 'Worn rock')],
@@ -63,7 +63,7 @@ export const ERAS: Era[] = [
   {
     id: 'sail', name: 'Age of Sail', icon: '⚓', blurb: 'Taverns, docks, ships',
     floor: [o('deck', 'Ship deck'), o('planks', 'Tavern floor'), o('cobble', 'Harbor cobbles'), o('flagstone', 'Flagstone')],
-    wall: [o('planks', 'Ship planks'), o('timber', 'Timber frame'), o('brick', 'Brick'), o('fieldstone', 'Harbor stone')],
+    wall: [o('clinker', 'Ship hull (clinker planks)'), o('nogging', 'Timber & herringbone brick'), o('georgian', 'Georgian brick (English bond)'), o('harbor', 'Harbor wall (battered granite)')],
     door: [o('wood', 'Plank door'), o('hatch', 'Ship hatch'), o('none', 'Open doorway')],
     pillar: [o('mast', 'Ship mast'), o('post', 'Wooden post'), o('bollard', 'Dock piling')],
     stairs: [o('wood', 'Wooden steps'), o('ladder', 'Ship ladder'), o('stone', 'Stone steps')],
@@ -77,7 +77,7 @@ export const ERAS: Era[] = [
   {
     id: 'steampunk', name: 'Steampunk', icon: '⚙', blurb: 'Foundries, brass, airships',
     floor: [o('ironplate', 'Riveted iron'), o('grate', 'Iron grating'), o('brick', 'Factory brick'), o('planks', 'Workshop planks')],
-    wall: [o('iron', 'Riveted iron'), o('pipes', 'Brick & pipes'), o('brick', 'Factory brick')],
+    wall: [o('iron', 'Riveted boiler plate'), o('pipes', 'Brick & steam pipes'), o('factory', 'Mill brick (pilasters & corbels)')],
     door: [o('vault', 'Vault door'), o('wood', 'Iron-bound door'), o('none', 'Open doorway')],
     pillar: [o('pipe', 'Pipe column'), o('girder', 'Iron girder'), o('round', 'Cast-iron column')],
     stairs: [o('metal', 'Iron steps'), o('spiral', 'Spiral steps'), o('wood', 'Wooden steps')],
@@ -91,7 +91,7 @@ export const ERAS: Era[] = [
   {
     id: 'modern', name: 'Modern', icon: '🏙', blurb: 'Cities, bunkers, warzones',
     floor: [o('concrete', 'Concrete'), o('tile', 'Floor tile'), o('asphalt', 'Street asphalt'), o('planks', 'Hardwood'), o('grate', 'Steel grating')],
-    wall: [o('cinder', 'Cinder block'), o('concretewall', 'Concrete'), o('brick', 'Brick'), o('iron', 'Sheet steel')],
+    wall: [o('cinder', 'Cinder block'), o('concretewall', 'Board-formed concrete'), o('facebrick', 'Face brick (soldier course)'), o('corrugated', 'Corrugated steel')],
     door: [o('metal', 'Steel door'), o('wood', 'Wooden door'), o('none', 'Open doorway')],
     pillar: [o('concrete', 'Concrete column'), o('ibeam', 'Steel I-beam'), o('lamp', 'Street lamp')],
     stairs: [o('concrete', 'Concrete steps'), o('metal', 'Steel steps')],
@@ -105,7 +105,7 @@ export const ERAS: Era[] = [
   {
     id: 'cyber', name: 'Cyberpunk', icon: '🌆', blurb: 'Neon alleys, megacity',
     floor: [o('cyberpanel', 'Street panels'), o('concrete', 'Cracked concrete'), o('grate', 'Grating'), o('hexdeck', 'Hex tiles')],
-    wall: [o('cyberwall', 'Neon panels'), o('concretewall', 'Concrete'), o('cinder', 'Cinder block')],
+    wall: [o('cyberwall', 'Neon panels'), o('precast', 'Ribbed precast concrete'), o('patched', 'Patched block & scrap')],
     door: [o('shutter', 'Roll-up shutter'), o('sliding', 'Sliding door'), o('none', 'Open doorway')],
     pillar: [o('neon', 'Neon column'), o('ibeam', 'Steel beam'), o('lamp', 'Street lamp')],
     stairs: [o('metal', 'Steel steps'), o('concrete', 'Concrete steps')],
@@ -119,7 +119,7 @@ export const ERAS: Era[] = [
   {
     id: 'scifi', name: 'Far future', icon: '🚀', blurb: 'Starship decks, stations',
     floor: [o('hexdeck', 'Hex deck plates'), o('scifiplate', 'Deck panels'), o('grate', 'Deck grating')],
-    wall: [o('bulkhead', 'Bulkhead'), o('scifipanel', 'Hull panels')],
+    wall: [o('bulkhead', 'Bulkhead (ribs & vents)'), o('scifipanel', 'Hull armor (hex plates)')],
     door: [o('sliding', 'Sliding blast door'), o('iris', 'Iris door'), o('none', 'Open hatchway')],
     pillar: [o('strut', 'Support strut'), o('reactor', 'Power conduit'), o('holo', 'Holo pylon')],
     stairs: [o('metal', 'Deck steps'), o('ramp', 'Ramp')],
@@ -133,7 +133,7 @@ export const ERAS: Era[] = [
   {
     id: 'alien', name: 'Alien', icon: '👽', blurb: 'Organic hives, crystal caves',
     floor: [o('alien', 'Organic floor'), o('crystal', 'Crystal ground'), o('rough', 'Alien rock')],
-    wall: [o('organic', 'Hive wall'), o('crystalwall', 'Crystal wall'), o('fieldstone', 'Ancient alien stone')],
+    wall: [o('organic', 'Hive wall'), o('crystalwall', 'Crystal columns'), o('megalith', 'Megaliths with glyphs')],
     door: [o('iris', 'Membrane iris'), o('none', 'Open passage')],
     pillar: [o('spire', 'Twisted spire'), o('crystals', 'Crystal column'), o('pod', 'Pod stalk')],
     stairs: [o('organic', 'Grown steps'), o('rough', 'Rock steps')],

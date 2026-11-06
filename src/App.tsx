@@ -119,7 +119,8 @@ export default function App() {
     (window as any).__forge = {
       set: (p: Params) => setBoard({ w: 6, d: 6, items: [{ id: 'one', p, x: 0, z: 0, y: 0, rot: 0 }] }, false),
       board: (b: Board) => setBoard(b, false),
-      frame: () => vp.current?.frame(),
+      frame: (id?: string) => vp.current?.frame(id ?? null),
+      defaults,
     };
     setVpGen((g) => g + 1);
     setTimeout(() => v.frame(), 50);

@@ -14,7 +14,7 @@ import { sqSize, type Params } from './params';
 
 export type Piece = { parts: Part[]; size: THREE.Vector3; box: THREE.Box3; name: string };
 
-const MASONRY = ['brick', 'ashlar', 'fieldstone', 'cinder', 'concretewall', 'pipes', 'cyberwall', 'crystalwall'];
+const MASONRY = ['brick', 'ashlar', 'fieldstone', 'marble', 'incertum', 'romanbrick', 'georgian', 'harbor', 'factory', 'pipes', 'megalith', 'crystalwall'];
 
 export function pieceName(p: Params) {
   const e = eraById(p.era);
